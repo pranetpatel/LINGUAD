@@ -1,0 +1,15 @@
+{
+  "name": "Lingua — AI Language Tutor",
+  "short_name": "Lingua",
+  "id": "family.lingua.app",
+  "description": "Voice-first AI language tutoring for families and classrooms — lingua.family.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F1F5F3",
+  "theme_color": "#0E7C6B",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
