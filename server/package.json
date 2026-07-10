@@ -3,6 +3,12 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lingua-family/lingua-web.git",
+    "directory": "server"
+  },
+  "homepage": "https://lingua.family",
   "scripts": {
     "start": "node index.js",
     "test": "node --test speech/score.test.js ratelimit.test.js stores/pg.test.js"

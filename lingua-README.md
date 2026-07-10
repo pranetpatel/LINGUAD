@@ -1,6 +1,7 @@
 # Lingua, your family's AI language tutor
 
-**Home: [lingua.family](https://lingua.family)** (client) · suggested API host: `api.lingua.family`
+**Repo:** [github.com/Lingua-family/lingua-web](https://github.com/Lingua-family/lingua-web) ·
+**Home:** [lingua.family](https://lingua.family) (client) · suggested API host: `api.lingua.family`
 
 A voice-first, installable web app (PWA): real spoken conversations with named AI tutors,
 lessons generated live around each learner, story time for kids, a listening lab, spaced-repetition
@@ -13,6 +14,8 @@ ElevenLabs and optional in-browser open-source HD voice (Kokoro-82M).
 ## Quick start
 
 ```bash
+git clone https://github.com/Lingua-family/lingua-web.git
+cd lingua-web
 npm install
 npm run dev
 ```

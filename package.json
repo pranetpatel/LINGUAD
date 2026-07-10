@@ -3,6 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lingua-family/lingua-web.git"
+  },
+  "homepage": "https://lingua.family",
+  "bugs": {
+    "url": "https://github.com/Lingua-family/lingua-web/issues"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

@@ -1,5 +1,7 @@
 # Deploying Lingua to lingua.family
 
+**Source repo:** [github.com/Lingua-family/lingua-web](https://github.com/Lingua-family/lingua-web)
+
 This guide takes the repo from `git clone` to a live product at **https://lingua.family** with the
 API at **https://api.lingua.family**. It covers the two deployable pieces, the static client
 (`/`, a Vite PWA) and the Node backend (`server/`), plus DNS, keys, Postgres, and post-deploy
@@ -19,6 +21,11 @@ no backend at all, if that's all you want, do step 3 only and stop.
 
 ## 0. Prerequisites
 
+```bash
+git clone https://github.com/Lingua-family/lingua-web.git
+cd lingua-web
+```
+
 Node 20+ locally and on the server host (the backend uses top-level `await` and the global
 `fetch`/`FormData`, so Node 18 is the hard floor; 20 or 22 recommended). The **lingua.family**
 domain registered and pointed at a DNS provider you control. An **Anthropic API key**
@@ -31,7 +38,8 @@ the server uses an atomic JSON file, which is fine for a family and wrong for a 
 
 The server is plain Node with no build step. It runs anywhere Node runs; pick one:
 
-**Railway / Render (easiest).** Create a service from the repo, set the root directory to
+**Railway / Render (easiest).** Create a service from
+[github.com/Lingua-family/lingua-web](https://github.com/Lingua-family/lingua-web), set the root directory to
 `server`, start command `npm start`. Add the environment variables from the table below in the
 dashboard. Both platforms give you a health-checkable HTTPS URL immediately; add
 `api.lingua.family` as a custom domain and they'll provision the certificate.
