@@ -4,7 +4,7 @@
 
 This guide takes the repo from `git clone` to a live product at **https://lingua.family** with the
 API at **https://api.lingua.family**. It covers the two deployable pieces, the static client
-(`/`, a Vite PWA) and the Node backend (`server/`), plus DNS, keys, Postgres, and post-deploy
+(`/`, a Vite PWA) and the Node backend (`server/`), plus DNS, keys, MongoDB, and post-deploy
 verification. Everything here matches the code as shipped; env variable names and endpoints are
 the ones the code actually reads.
 
@@ -13,10 +13,10 @@ the ones the code actually reads.
 The client is a fully static build (`dist/`) served from any CDN or static host. The backend is a
 single Node process (Express + a WebSocket upgrade handler on the same port) that holds all API
 keys, owns the account database, and exposes: `/api/health`, `/api/config`, `/api/auth/*`,
-`/api/household` (GET/PUT/DELETE, versioned sync), `/api/ai` (Anthropic proxy), `/api/tts`
+`/api/household` (GET/PUT/DELETE, versioned sync), `/api/ai` (OpenAI proxy), `/api/tts`
 (ElevenLabs proxy), `/api/speech/score` (scoring pipeline), and `ws(s)://…/api/asr/stream`
 (streaming ASR gateway). Clients authenticate with bearer tokens; browsers never see a provider
-key. The client also runs in a device-only mode with a user-supplied Anthropic key, which needs
+key. The client also runs in a device-only mode with a user-supplied OpenAI key, which needs
 no backend at all, if that's all you want, do step 3 only and stop.
 
 ## 0. Prerequisites
@@ -28,10 +28,10 @@ cd lingua-web
 
 Node 20+ locally and on the server host (the backend uses top-level `await` and the global
 `fetch`/`FormData`, so Node 18 is the hard floor; 20 or 22 recommended). The **lingua.family**
-domain registered and pointed at a DNS provider you control. An **Anthropic API key**
-(console.anthropic.com), required for all AI features. Optional: an **ElevenLabs API key**
+domain registered and pointed at a DNS provider you control. An **OpenAI API key**
+(platform.openai.com), required for all AI features. Optional: an **ElevenLabs API key**
 (premium tutor voices + acoustic pronunciation scoring), a **Deepgram API key** (live streaming
-transcription in conversations), and a **Postgres database** (production persistence; without it
+transcription in conversations), and a **MongoDB database** (production persistence; without it
 the server uses an atomic JSON file, which is fine for a family and wrong for a business).
 
 ## 1. Deploy the backend to api.lingua.family
@@ -69,10 +69,10 @@ Copy `server/.env.example` to `server/.env` (or set these in your platform's das
 
 ```bash
 PORT=8787
-ANTHROPIC_API_KEY=sk-ant-...            # required, lessons, talk, stories, digests
+OPENAI_API_KEY=sk-...                   # required, lessons, talk, stories, digests
 ELEVENLABS_API_KEY=...                  # optional, premium voices + acoustic STT scoring
 DEEPGRAM_API_KEY=...                    # optional, live streaming transcription (nova-2)
-DATABASE_URL=postgres://user:pass@host:5432/lingua   # optional, Postgres instead of JSON file
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/lingua   # optional, MongoDB instead of JSON file
 CLIENT_ORIGIN=https://lingua.family     # CORS allow-list; comma-separate extra origins
 JWT_SECRET=<64 random hex chars>        # openssl rand -hex 32; auto-generated if empty
 ```
@@ -80,9 +80,9 @@ JWT_SECRET=<64 random hex chars>        # openssl rand -hex 32; auto-generated i
 Notes that matter: `CLIENT_ORIGIN` must exactly match the deployed client origin (scheme
 included) or every browser call fails CORS. Set `JWT_SECRET` explicitly in production, the
 auto-generated fallback lands in `server/data/secret`, which disappears on ephemeral filesystems
-and would sign everyone out on each deploy. With `DATABASE_URL` set the server logs
-`[store] backend: pg` at boot and creates its own tables (`accounts`, `households`); no migration
-step. Without Postgres, back up `server/data/db.json`, it is the entire database.
+and would sign everyone out on each deploy. With `MONGODB_URI` set the server logs
+`[store] backend: mongo` at boot and creates its own collections (`accounts`, `households`); no migration
+step. Without MongoDB, back up `server/data/db.json`, it is the entire database.
 
 ### Verify the backend
 
@@ -91,10 +91,10 @@ curl https://api.lingua.family/api/health
 # {"ok":true,"service":"lingua"}
 curl https://api.lingua.family/api/config
 # {"ai":true,"tts":true,"stt":true,"streamingAsr":true}  ← booleans reflect your keys
-npm test   # from server/: 13 tests, scoring pipeline, rate limiter, Postgres store
+npm test   # from server/: 9 tests, scoring pipeline, rate limiter
 ```
 
-If `ai` is `false`, the Anthropic key isn't reaching the process, check the dashboard scoping
+If `ai` is `false`, the OpenAI key isn't reaching the process, check the dashboard scoping
 (some platforms separate build-time and runtime variables).
 
 ## 2. Deploy the client to lingua.family
@@ -126,7 +126,7 @@ Open https://lingua.family. The first-run screen offers two modes. For the full 
 it, stores the address, and from then on every device that signs in gets synced households,
 server-held keys, "Say it, get scored" pronunciation practice, and (with Deepgram) live
 streaming transcription in Talk. For a single-device setup with no backend, choose **"This device
-only"** and paste an Anthropic API key; everything except the server features works identically.
+only"** and paste an OpenAI API key; everything except the server features works identically.
 
 ## 4. Post-deploy smoke test
 
@@ -139,7 +139,7 @@ mis-enter a password eleven times and confirm a 429 (rate limiting); and finally
 
 ## 5. Operations
 
-**Backups.** Postgres: your provider's automated backups cover it. JSON store: cron-copy
+**Backups.** MongoDB: your provider's automated backups cover it. JSON store: cron-copy
 `server/data/db.json` somewhere off-box; writes are atomic (`tmp` + rename) so copies are always
 consistent.
 
@@ -150,12 +150,12 @@ and sync versioning means in-flight clients reconcile with a 409/refresh, not da
 
 **Scaling honesty.** Rate limits are in-process memory, so they're per-instance, behind a load
 balancer with N replicas the effective limits multiply by N until you move the buckets to Redis.
-The JSON store is single-instance only; use Postgres before running two replicas. The ASR gateway
+The JSON store is single-instance only; use MongoDB before running two replicas. The ASR gateway
 holds one upstream Deepgram socket per active speaker, a Pi handles a family, a small VM handles
 a school.
 
-**Costs to expect.** Anthropic usage scales with lessons/conversations generated (each turn is a
-small Sonnet call, capped at 1,600 output tokens server-side). ElevenLabs bills per character
+**Costs to expect.** OpenAI usage scales with lessons/conversations generated (each turn is a
+small gpt-4o call, capped at 1,600 output tokens server-side). ElevenLabs bills per character
 spoken by tutors; the server truncates TTS requests at 900 characters. Deepgram bills per audio
 minute streamed, with a 15-second cap per utterance and a 30-second hard session cap in the
 gateway.

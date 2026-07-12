@@ -8,7 +8,7 @@ lessons generated live around each learner, story time for kids, a listening lab
 review, self-updating skill assessments, family accounts with parent PIN controls, and a full
 teacher/classroom mode with assignments.
 
-Built with React + Vite. AI powered by Claude (Anthropic API). Optional premium voice via
+Built with React + Vite. AI powered by GPT (OpenAI API). Optional premium voice via
 ElevenLabs and optional in-browser open-source HD voice (Kokoro-82M).
 
 ## Quick start
@@ -20,9 +20,9 @@ npm install
 npm run dev
 ```
 
-Open the printed URL. On first launch, paste an **Anthropic API key**
-(create one at https://console.anthropic.com → API keys). The key is stored only in your
-browser's localStorage and requests go directly from your browser to Anthropic — usage bills
+Open the printed URL. On first launch, paste an **OpenAI API key**
+(create one at https://platform.openai.com → API keys). The key is stored only in your
+browser's localStorage and requests go directly from your browser to OpenAI — usage bills
 to your key.
 
 ## Build & deploy
@@ -77,7 +77,7 @@ The `server/` folder is a self-hostable backend implementing the blueprint's pro
 
 ```bash
 cd server
-cp .env.example .env        # add ANTHROPIC_API_KEY (and optionally ELEVENLABS_API_KEY)
+cp .env.example .env        # add OPENAI_API_KEY (and optionally ELEVENLABS_API_KEY)
 npm install
 npm start                   # → http://localhost:8787
 npm test                    # speech-pipeline unit tests
@@ -90,7 +90,7 @@ What server mode gives you:
   versioned household document. Every change pushes with its base version; the server accepts
   or returns `409` with the newer copy, and clients pull on focus + every 25 s. Sign in on a
   phone and a laptop and watch a lesson finished on one appear on the other.
-- **Server-held keys** — the Anthropic and ElevenLabs keys live only in the server's `.env`.
+- **Server-held keys** — the OpenAI and ElevenLabs keys live only in the server's `.env`.
   Clients call `/api/ai` and `/api/tts` proxies with their bearer token; no key ever reaches
   a browser, per the blueprint's security model.
 - **The speech-scoring pipeline** (`/api/speech/score`) — normalize → similarity-weighted word
@@ -100,11 +100,10 @@ What server mode gives you:
   confidence); otherwise the browser transcript feeds the same pipeline. In the app it powers
   the **"🎯 Say it — get scored"** buttons on lesson vocabulary and debrief corrections, with
   word-by-word color chips and phoneme tips, feeding the speaking-skill assessment.
-- **Postgres behind the store seam** — set `DATABASE_URL` and the server uses Postgres
-  (`accounts` + `households` tables, JSONB documents, optimistic concurrency via
-  `UPDATE … WHERE version = $base`). Unset, it falls back to the atomic JSON file. Both
-  implementations share one async interface (`server/stores/`), and the Postgres SQL is
-  verified in tests against an in-memory Postgres engine (`npm test`).
+- **MongoDB behind the store seam** — set `MONGODB_URI` and the server uses MongoDB
+  (`accounts` + `households` collections, optimistic concurrency via a version check on
+  update). Unset, it falls back to the atomic JSON file. Both implementations share one
+  async interface (`server/stores/`).
 - **Streaming ASR gateway** — `ws(s)://…/api/asr/stream?token=…&lang=es|en`. The client
   streams MediaRecorder audio chunks; the gateway relays to a provider and returns
   `interim`/`final` JSON frames. With `DEEPGRAM_API_KEY` set, live transcription runs on
@@ -123,13 +122,13 @@ What server mode gives you:
 
 Device-only mode keeps everything local (fine for one device). Server mode implements the
 blueprint's backend layer: server-held keys, real auth, sync, and the scoring pipeline.
-Postgres, streaming ASR, and rate limiting are now in. Remaining per the blueprint:
+MongoDB, streaming ASR, and rate limiting are now in. Remaining per the blueprint:
 forced-alignment GOP phoneme scoring on the streaming audio (the provider interface is the
 slot-in point), Redis-backed rate limits for multi-instance deploys, and per-seat billing.
 
 ## Deploying
 
-Full production walkthrough — DNS, both deploy targets, env vars, Postgres, smoke tests,
+Full production walkthrough — DNS, both deploy targets, env vars, MongoDB, smoke tests,
 and ops — lives in [DEPLOY.md](DEPLOY.md).
 
 ## Project layout
