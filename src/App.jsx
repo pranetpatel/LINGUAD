@@ -21,7 +21,7 @@ if (typeof window !== "undefined" && !window.storage) {
     async delete(key) { localStorage.removeItem("lingua:" + key); return { key, deleted: true }; },
   };
 }
-const getApiKey = () => { try { return localStorage.getItem("lingua-anthropic-key") || ""; } catch { return ""; } };
+const getApiKey = () => { try { return localStorage.getItem("lingua-openai-key") || ""; } catch { return ""; } };
 const hasAiAccess = () => { try { return !!(getApiKey() || localStorage.getItem("lingua-skip-key")); } catch { return true; } };
 
 // ── Lingua server mode: multi-device sync + server-held keys ──
@@ -450,7 +450,7 @@ function useStreamingSTT(langCode, handlersRef) {
 
 /* ───────────────────────────── AI helper ───────────────────────────── */
 
-async function askClaude(messages, { system, json = false, maxTokens = 1000 } = {}) {
+async function askAI(messages, { system, json = false, maxTokens = 1000 } = {}) {
   let msgs = Array.isArray(messages) ? [...messages] : [{ role: "user", content: messages }];
   if (system) {
     if (msgs[0]?.role === "user") msgs[0] = { ...msgs[0], content: `${system}\n\n---\n\n${msgs[0].content}` };
@@ -465,18 +465,20 @@ async function askClaude(messages, { system, json = false, maxTokens = 1000 } = 
     });
   } else {
     const key = getApiKey();
-    res = await fetch("https://api.anthropic.com/v1/messages", {
+    res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(key ? { "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" } : {}),
+        ...(key ? { Authorization: `Bearer ${key}` } : {}),
       },
-      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, messages: msgs }),
+      body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages: msgs }),
     });
   }
   if (!res.ok) throw new Error(`API ${res.status}`);
   const data = await res.json();
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+  const text = isServer()
+    ? (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim()
+    : (data.choices?.[0]?.message?.content || "").trim();
   if (!json) return text;
   const clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
   try { return JSON.parse(clean); }
@@ -839,7 +841,7 @@ function ModeGate({ onDone }) {
       <Card onClick={() => { try { localStorage.setItem("lingua-mode", "local"); } catch {} onDone(); }}>
         <div className="f-body" style={{ fontWeight: 600, fontSize: 16 }}>📱 This device only</div>
         <div className="f-body" style={{ fontSize: 13.5, color: FADE, marginTop: 3 }}>
-          Everything stays on this device. You'll paste an Anthropic API key on the next screen.
+          Everything stays on this device. You'll paste an OpenAI API key on the next screen.
         </div>
       </Card>
     </div>
@@ -858,14 +860,14 @@ function ApiKeyGate({ onDone }) {
       </div>
       <h1 className="f-display" style={{ fontSize: 30, fontWeight: 600, lineHeight: 1.15, marginBottom: 10 }}>Connect your tutor's brain</h1>
       <p className="f-body" style={{ color: FADE, fontSize: 15, lineHeight: 1.55, marginBottom: 20 }}>
-        Lingua's lessons, conversations, and stories are generated live by Claude. Paste an Anthropic API key
-        (get one at <b>console.anthropic.com</b>). It's stored only on this device and calls go straight from your
-        browser to Anthropic — usage bills to your key.
+        Lingua's lessons, conversations, and stories are generated live by GPT. Paste an OpenAI API key
+        (get one at <b>platform.openai.com</b>). It's stored only on this device and calls go straight from your
+        browser to OpenAI — usage bills to your key.
       </p>
-      <input type="password" value={key} onChange={e => setKey(e.target.value)} placeholder="sk-ant-…"
-        className="f-body" style={inputStyle} aria-label="Anthropic API key" />
+      <input type="password" value={key} onChange={e => setKey(e.target.value)} placeholder="sk-…"
+        className="f-body" style={inputStyle} aria-label="OpenAI API key" />
       <Btn full accent="#0E7C6B" disabled={key.trim().length < 12}
-        onClick={() => { try { localStorage.setItem("lingua-anthropic-key", key.trim()); } catch {} onDone(); }}>
+        onClick={() => { try { localStorage.setItem("lingua-openai-key", key.trim()); } catch {} onDone(); }}>
         Save & start <ArrowRight size={16} />
       </Btn>
       <button onClick={() => { try { localStorage.setItem("lingua-skip-key", "1"); } catch {} onDone(); }}
@@ -1060,7 +1062,7 @@ function SetupMember({ role, context = "family", defaults = {}, onDone, onCancel
   const startPlacement = async () => {
     setPlacing(true); setQErr(false);
     try {
-      const r = await askClaude(
+      const r = await askAI(
         `Create a 5-question placement quiz for a ${m.native}-speaking learner of ${LANGS[m.target].name}. Questions rise A1→B2, mixing vocabulary and grammar. Respond ONLY with JSON, no fences: {"items":[{"prompt":"...","options":["a","b","c","d"],"answer":0,"cefr":"A1"}]}`,
         { json: true, maxTokens: 900 });
       setQuiz(r.items); setQi(0); setScore(0);
@@ -1652,7 +1654,7 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
     setMsgs(m); setTyped(""); setBusy(true); busyRef.current = true;
     if (typeof conf === "number") observeSkill("speaking", Math.max(0.2, Math.min(1, 0.35 + conf * 0.65)));
     let reply = "…sorry, say that again?";
-    try { reply = await askClaude(m.map(({ role, content }) => ({ role, content })), { system: sysFor(scenario), maxTokens: 220 }); } catch {}
+    try { reply = await askAI(m.map(({ role, content }) => ({ role, content })), { system: sysFor(scenario), maxTokens: 220 }); } catch {}
     setMsgs([...m, { role: "assistant", content: reply }]);
     setBusy(false); busyRef.current = false;
     if (!mutedRef.current) tts.say(reply, { onEnd: () => setTimeout(resumeListen, 150) });
@@ -1732,7 +1734,7 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
   const start = async (sc) => {
     setScenario(sc); setBusy(true); busyRef.current = true; setDebrief(null); setMsgs([]); setMicErr(false);
     let opener = kid ? "Hi! Ready to play?" : "Hi! Ready when you are.";
-    try { opener = await askClaude("Open with one short, inviting spoken line.", { system: sysFor(sc), maxTokens: 120 }); } catch {}
+    try { opener = await askAI("Open with one short, inviting spoken line.", { system: sysFor(sc), maxTokens: 120 }); } catch {}
     setMsgs([{ role: "assistant", content: opener }]);
     setBusy(false); busyRef.current = false;
     const autoMic = stt.supported && micState === "granted";
@@ -1746,7 +1748,7 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
     const userTurns = msgs.filter(m => m.role === "user").length;
     try {
       const transcript = msgs.map(m => `${m.role === "user" ? "LEARNER" : "TUTOR"}: ${m.content}`).join("\n");
-      const d = await askClaude(
+      const d = await askAI(
         `Transcript:\n${transcript}\n\nGive a ${kid ? "super gentle, fun, child-friendly" : "warm"} coaching debrief. Respond ONLY with JSON, no fences:
 {"praise":"1 specific sentence in ${p.native}","corrections":[{"you":"...","better":"natural ${LANGS[p.target].name}","why":"short, in ${p.native}"}],"newWords":[{"term":"...","translation":"${p.native}","example":"..."}],"tip":"one confidence sentence in ${p.native}"}
 Max ${kid ? 1 : 3} corrections (empty array if none), max ${kid ? 2 : 3} newWords.`,
@@ -2009,7 +2011,7 @@ function StoryView({ member, tts, accent, addWords, finish, observeSkill }) {
   const generate = async () => {
     setLoading(true); setErr(false); setStory(null); setSi(0); setStars(0); setDone(false);
     try {
-      const s = await askClaude(
+      const s = await askAI(
         `${memberBrief(member)}\n\nWrite a 5-scene interactive picture story for this child about one of their interests. Respond ONLY with JSON, no fences:
 {"title":"fun title in ${p.native}","scenes":[{"emoji":["3-5 emoji that paint the scene"],"bg":["#hex","#hex"],"text":"1-2 VERY short ${LANGS[p.target].name} sentences (level ${p.level})","gloss":"${p.native} meaning","question":null or {"prompt":"playful question in ${p.native} about the scene or a ${LANGS[p.target].name} word in it","options":["3 short options"],"answer":0}}],"words":[{"term":"${LANGS[p.target].name} word from the story","translation":"${p.native}","example":"short line"}],"ending":"one happy closing line in ${p.native}"}
 Scenes 2 and 4 must include a question; others null. Soft pastel bg colors. Wholesome, silly, magical — never scary. 2 words.`,
@@ -2138,7 +2140,7 @@ function LessonView({ member, tts, accent, addWords, finish, exit, observeSkill,
   const generate = useCallback(async () => {
     setLoading(true); setErr(false);
     try {
-      const l = await askClaude(
+      const l = await askAI(
         `${memberBrief(member)}\n\nGenerate today's ${kid ? "playful mini-" : ""}lesson ${assignedTopic ? `on the topic the teacher assigned: "${assignedTopic}" — build the whole lesson around it, flavored with the learner's interests` : "themed on the learner's interests"}. Respond ONLY with JSON, no fences:
 {"title":"short title in ${p.native}","intro":"2 ${kid ? "excited, kid-friendly" : "warm"} sentences in ${p.native}","vocab":[{"term":"...","emoji":"one emoji","ipa":"IPA","translation":"${p.native}","example":"short ${LANGS[p.target].name} sentence","exampleGloss":"${p.native}"}],"exercises":[{"prompt":"question, may include a ___ blank","options":["4 options"],"answer":0,"explain":"1 sentence in ${p.native}"}],"culture":"one fun ${kid ? "kid-friendly " : ""}fact in ${p.native}, 1-2 sentences"}
 Exactly ${kid ? 4 : 5} vocab items at level ${p.level}, exactly ${kid ? 3 : 4} exercises practicing them. Never test a word before teaching it.`,
@@ -2302,7 +2304,7 @@ function ListeningLab({ member, voices, accent, addWords, finish, exit, observeS
     setChannel(ch); setLoading(true); setErr(false); setClip(null);
     setStage("listen"); setListens(0); setShowScript(false); setQi(0); setPicked(null); setCorrect(0);
     try {
-      const c = await askClaude(
+      const c = await askAI(
         `${memberBrief(member)}\n\nWrite a short ${LANGS[p.target].name} listening clip in the format "${ch.label}" (${ch.speakers} speaker${ch.speakers > 1 ? "s" : ""}), themed on the learner's interests. Respond ONLY with JSON, no fences:
 {"title":"short title in ${p.native}","scene":"one-line setup in ${p.native} (who/where — no spoilers)","speakers":["first name"${ch.speakers > 1 ? ',"first name"' : ""}],"lines":[{"s":0,"text":"one short natural ${LANGS[p.target].name} sentence","gloss":"${p.native} meaning"}],"questions":[{"prompt":"comprehension question in ${p.native}","options":["4 options in ${p.native}"],"answer":0,"explain":"1 sentence in ${p.native}"}],"words":[{"term":"useful ${LANGS[p.target].name} word from the clip","translation":"${p.native}","example":"short line"}]}
 ${ch.speakers > 1 ? '"s" alternates 0/1 between speakers.' : '"s" is always 0.'} 6–9 lines, spoken register, level ${p.level} plus a small stretch. Exactly 3 questions that require actually understanding the clip (not guessable from options alone). Exactly 3 words.`,
@@ -2557,7 +2559,7 @@ function TranslateView({ member, tts, accent, addWords }) {
     const src = dir === "to" ? p.native : LANGS[p.target].name;
     const dst = dir === "to" ? LANGS[p.target].name : p.native;
     try {
-      const r = await askClaude(
+      const r = await askAI(
         `Translate from ${src} to ${dst} for a ${p.level} learner: "${text.trim()}"
 Respond ONLY with JSON, no fences:
 {"translation":"best natural translation","breakdown":[{"part":"chunk","gloss":"${p.native} meaning / grammar role"}],"variants":{"formal":"…","informal":"…","slang":"regional/slang, name region"},"note":"one usage/culture note in ${p.native}"}
@@ -2877,7 +2879,7 @@ function ProfileView({ member, household, accent, tts, voices, update, reset, sw
               <Btn small accent={accent} onClick={pin.set}>Set parent PIN</Btn>
             )}
           </div>
-          <button onClick={() => { try { ["lingua-anthropic-key", "lingua-skip-key", "lingua-mode", "lingua-server-url", "lingua-token"].forEach(k => localStorage.removeItem(k)); } catch {} window.location.reload(); }}
+          <button onClick={() => { try { ["lingua-openai-key", "lingua-skip-key", "lingua-mode", "lingua-server-url", "lingua-token"].forEach(k => localStorage.removeItem(k)); } catch {} window.location.reload(); }}
             className="f-body" style={{ background: "none", border: "none", color: FADE, fontSize: 12, cursor: "pointer", padding: 0, marginTop: 10, display: "block" }}>
             ⚙️ Change connection (server / API key)
           </button>
@@ -2919,7 +2921,7 @@ function WeeklyDigest({ members, household, accent, viewerNative, onSave }) {
         const sk = SKILLS.map(k => `${SKILL_LABELS[k]} ${Math.round(m.skills[k]?.s || 15)}`).join(", ");
         return `${m.name} (${AGE_BANDS[m.ageBand].label}, learning ${LANGS[m.profile.target].name}, ${m.profile.level}): streak ${m.stats.streak}d, ${m.stats.lessons} lessons, ${m.stats.talks} talks, ${m.stats.stories || 0} stories total; skills [${sk}] trend ${trendOf(m) >= 0 ? "+" : ""}${trendOf(m).toFixed(1)}; deck ${m.deck.length} words (${due} due); struggles: ${weak.join(", ") || "none"}`;
       }).join("\n");
-      const d = await askClaude(
+      const d = await askAI(
         `You are writing a warm, concrete weekly progress digest for a ${cls ? "teacher about their students" : "parent about their family's language learning"}. Write in ${viewerNative}. Data:\n${lines}\n\nRespond ONLY with JSON, no fences:
 {"headline":"one upbeat, specific sentence about the ${cls ? "class" : "family"} overall","members":[{"name":"exact name from data","summary":"2 warm, specific sentences grounded ONLY in the data (no invented events)","tip":"1 concrete, actionable suggestion for this week"}]}
 One entry per person, in the same order. Never invent activity that isn't in the data; if someone was inactive, say so kindly and suggest a tiny restart.`,
