@@ -100,8 +100,9 @@ If `ai` is `false`, the Anthropic key isn't reaching the process, check the dash
 ## 2. Deploy the client to lingua.family
 
 **Production setup:** [Lingua-family/lingua-web](https://github.com/Lingua-family/lingua-web) on GitHub →
-**BOS** Vercel team, project **lingua-web** (currently `lingua-web-eight.vercel.app`).
-Pushes to `master` auto-deploy; add **lingua.family** as the custom domain in the Vercel project.
+**BOS** Vercel team, project **lingua-web**. Custom domains **lingua.family** and **www.lingua.family**
+are already attached (apex redirects to `www`); pushes to `master` auto-deploy to
+[https://www.lingua.family](https://www.lingua.family).
 
 ```bash
 npm install
@@ -110,9 +111,7 @@ npm run build        # → dist/ (~93 KB gzipped)
 
 For a manual deploy from this checkout: `vercel link --scope bos-studio --project lingua-web`, then
 `vercel --prod`. Framework preset **Vite**, build `npm run build`, output `dist`, root `/` (not
-`server/`). Netlify / Cloudflare Pages work too if you prefer — same build commands. Then add
-**lingua.family** as the custom domain and create the DNS records your host specifies (typically an
-apex `A`/`ALIAS` plus a `www` CNAME, redirect `www` to the apex).
+`server/`). Netlify / Cloudflare Pages work too if you prefer — same build commands.
 HTTPS is not optional: the microphone, the PWA install prompt, and the service worker all require
 a secure origin.
 
