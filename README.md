@@ -34,7 +34,9 @@ npm run preview    # test the production build locally
 
 Deploy `dist/` to any static host, then point **lingua.family** at it (add the custom
 domain in your host's dashboard; DNS: apex A/ALIAS or CNAME per their docs):
-- **Vercel**: framework preset "Vite", build `npm run build`, output `dist`
+- **Vercel (production):** BOS team → project **lingua-web**, wired to
+  [Lingua-family/lingua-web](https://github.com/Lingua-family/lingua-web); framework preset "Vite",
+  build `npm run build`, output `dist`
 - **Netlify**: build `npm run build`, publish `dist`
 - **GitHub Pages / Cloudflare Pages**: serve `dist`
 
