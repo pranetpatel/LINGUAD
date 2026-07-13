@@ -1,0 +1,7 @@
+project_id = "lingua"
+
+[functions.ai]
+verify_jwt = false
+
+[functions.tts]
+verify_jwt = false

@@ -6,6 +6,11 @@ import {
   Settings, LogOut, Eye, EyeOff, TrendingUp, TrendingDown, Minus, Wand2, Home,
   Headphones, Play, RotateCcw, ClipboardList, ArrowUpRight, SlidersHorizontal
 } from "lucide-react";
+import {
+  supabase, supabaseConfigured, supaSignup, supaLogin, supaLogout,
+  supaGetHousehold, supaPutHousehold, supaResetHousehold, supaAskAI, supaTts,
+} from "./supabase.js";
+import { scoreUtterance } from "./speechScore.js";
 
 /* Standalone-app shims ——————————————————————————————————————— */
 // Persistent storage: use the host's window.storage when present (Claude
@@ -37,10 +42,18 @@ const SRV_URL = () => {
   return typeof window !== "undefined" ? window.location.origin : "";
 };
 const SRV_TOKEN = () => { try { return localStorage.getItem("lingua-token") || ""; } catch { return ""; } };
-const APP_MODE = () => { try { return localStorage.getItem("lingua-mode") || "server"; } catch { return "server"; } };
-const isServer = () => APP_MODE() === "server" && !!SRV_URL();
+// Mode defaults to the build's VITE_APP_MODE (see .env.example); a device
+// can still override it from localStorage for local testing.
+const APP_MODE = () => { try { return localStorage.getItem("lingua-mode") || import.meta.env.VITE_APP_MODE || "server"; } catch { return import.meta.env.VITE_APP_MODE || "server"; } };
+const isSupabase = () => APP_MODE() === "supabase" && supabaseConfigured;
+const isServer = () => (APP_MODE() === "server" && !!SRV_URL()) || isSupabase();
 let serverCaps = { ai: false, tts: false, stt: false, streamingAsr: false };
+
+/* Same {status, version, data, token, error} shape as the Express backend,
+   whichever remote mode (self-hosted server/ or Supabase) is active — so
+   every isServer()/srv() call site below stays backend-agnostic. */
 async function srv(path, { method = "GET", body } = {}) {
+  if (isSupabase()) return srvSupabase(path, method, body);
   const res = await fetch(SRV_URL() + path, {
     method,
     headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(SRV_TOKEN() ? { Authorization: "Bearer " + SRV_TOKEN() } : {}) },
@@ -49,6 +62,24 @@ async function srv(path, { method = "GET", body } = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok && res.status !== 409) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status });
   return { status: res.status, ...data };
+}
+async function srvSupabase(path, method, body) {
+  if (path === "/api/config") return { status: 200, ai: true, tts: true, stt: false, streamingAsr: false };
+  if (path === "/api/auth/signup") return { status: 200, ...(await supaSignup(body)) };
+  if (path === "/api/auth/login") return { status: 200, ...(await supaLogin(body)) };
+  if (path === "/api/household" && method === "GET") return { status: 200, ...(await supaGetHousehold()) };
+  if (path === "/api/household" && method === "PUT") {
+    const r = await supaPutHousehold(body.version, body.data);
+    return r.ok ? { status: 200, version: r.version } : { status: 409, conflict: true, version: r.version, data: r.data };
+  }
+  if (path === "/api/household" && method === "DELETE") {
+    const { data: { user } } = await supabase.auth.getUser();
+    const fresh = { account: { name: "", email: user?.email || "" }, type: "family", members: [] };
+    const r = await supaResetHousehold(fresh);
+    await supaLogout();
+    return { status: 200, ...r };
+  }
+  throw Object.assign(new Error(`Unsupported Supabase path: ${path}`), { status: 500 });
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -299,7 +330,9 @@ function useTTS(member, voices, elevenKey) {
           try {
             setSpeaking(true);
             let blob;
-            if (isServer()) {
+            if (isSupabase()) {
+              blob = await supaTts(clean, shape.voiceKey);
+            } else if (isServer()) {
               const r = await fetch(SRV_URL() + "/api/tts", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: "Bearer " + SRV_TOKEN() },
@@ -466,16 +499,20 @@ async function askAI(messages, { system, json = false, maxTokens = 1000 } = {}) 
     if (msgs[0]?.role === "user") msgs[0] = { ...msgs[0], content: `${system}\n\n---\n\n${msgs[0].content}` };
     else msgs = [{ role: "user", content: `${system}\n\nBegin now.` }, ...msgs];
   }
-  let res;
-  if (isServer()) {
-    res = await fetch(SRV_URL() + "/api/ai", {
+  let data;
+  if (isSupabase()) {
+    data = await supaAskAI(msgs, maxTokens); // {content:[{type,text}]} — same shape as server/'s /api/ai
+  } else if (isServer()) {
+    const res = await fetch(SRV_URL() + "/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + SRV_TOKEN() },
       body: JSON.stringify({ messages: msgs, maxTokens }),
     });
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    data = await res.json();
   } else {
     const key = getApiKey();
-    res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -483,10 +520,10 @@ async function askAI(messages, { system, json = false, maxTokens = 1000 } = {}) 
       },
       body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages: msgs }),
     });
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    data = await res.json();
   }
-  if (!res.ok) throw new Error(`API ${res.status}`);
-  const data = await res.json();
-  const text = isServer()
+  const text = (isServer())
     ? (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim()
     : (data.choices?.[0]?.message?.content || "").trim();
   if (!json) return text;
@@ -1484,7 +1521,10 @@ function PracticeSay({ target, lang, accent, onScore }) {
           const audioB64 = blob.size > 0 && blob.size < 900000
             ? await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => res(null); r.readAsDataURL(blob); })
             : null;
-          const r = await srv("/api/speech/score", { method: "POST", body: { expected: target, lang, transcript: trRef.current.t, confidence: trRef.current.c, audioB64, mime: blob.type } });
+          const r = isSupabase()
+            // no acoustic ASR proxy in Supabase mode — score straight off the browser's own transcript
+            ? { ...scoreUtterance({ expected: target, heard: trRef.current.t, lang: lang === "es" ? "es" : "en", overallConf: trRef.current.c }), heard: trRef.current.t, provider: "browser" }
+            : await srv("/api/speech/score", { method: "POST", body: { expected: target, lang, transcript: trRef.current.t, confidence: trRef.current.c, audioB64, mime: blob.type } });
           setResult(r); setPhase("done");
           sfx(r.overall >= 85 ? "ding" : "soft");
           onScore && onScore(r.overall / 100);
@@ -3477,7 +3517,7 @@ function LinguaApp() {
           else enterMember(id);
         }}
         onAdd={() => requirePin(`${pinWord} PIN required to add ${household.type === "classroom" ? "students" : "members"}`, () => setRoute("add-choice"))}
-        onSignOut={() => { try { localStorage.removeItem("lingua-token"); } catch {} setSignedIn(false); setActiveId(null); setPinOk(false); setRoute("auth"); }} />
+        onSignOut={() => { if (isSupabase()) supaLogout(); try { localStorage.removeItem("lingua-token"); } catch {} setSignedIn(false); setActiveId(null); setPinOk(false); setRoute("auth"); }} />
       {pinModal && (
         <PinPad mode={pinModal.mode} title={pinModal.title} pinHash={household.pinHash}
           onSuccess={pinModal.onSuccess} onSet={pinModal.onSet} onClose={() => setPinModal(null)} />
