@@ -1,9 +1,10 @@
 /* Supabase client + data layer — the free-tier replacement for server/.
    Auth: Supabase Auth (email/password). Data: `households` table, RLS-scoped
    to the signed-in user, same {version, data} shape server/stores/*.js used.
-   AI/TTS: proxied through Supabase Edge Functions so provider keys never
-   reach the browser. See supabase/ for schema + functions, SUPABASE_SETUP.md
-   for the one-time project setup. */
+   AI/TTS: proxied through Vercel serverless functions (api/ai.js, api/tts.js)
+   so provider keys never reach the browser and live alongside the rest of
+   the Vercel env config. See supabase/ for schema, SUPABASE_SETUP.md for the
+   one-time project setup. */
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
@@ -17,13 +18,12 @@ export const supabase = supabaseConfigured
 
 const freshHousehold = (name, email, type) => ({ account: { name, email }, type, members: [] });
 
-async function authedFetch(fnName, body) {
+async function authedFetch(path, body) {
   const { data: { session } } = await supabase.auth.getSession();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
+  const res = await fetch(`/api/${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
     },
     body: JSON.stringify(body),

@@ -1,10 +1,11 @@
 # Running Lingua on Supabase (free tier)
 
 This is the alternative to `server/` + MongoDB described in the architecture memo:
-Supabase Auth + Postgres replace the account/household backend, a Supabase Edge
-Function proxies OpenAI/ElevenLabs so keys stay off the client, and speech-to-text
-runs in the browser (Web Speech API) instead of a server-side ASR gateway.
-`server/` is untouched — this is a parallel mode, switched with one env var.
+Supabase Auth + Postgres replace the account/household backend, Vercel serverless
+functions (`api/ai.js`, `api/tts.js`) proxy OpenAI/ElevenLabs so keys stay off the
+client, and speech-to-text runs in the browser (Web Speech API) instead of a
+server-side ASR gateway. `server/` is untouched — this is a parallel mode,
+switched with one env var.
 
 ## 1. Create the Supabase project (2 minutes)
 
@@ -28,20 +29,22 @@ ever read/write their own row.
 signup needs a click-through email before the account can sign in — fine for
 production, annoying mid-demo. Turn it back on before real users show up.
 
-## 4. Deploy the AI/TTS proxy (Edge Functions)
+## 4. Configure the AI/TTS proxy (Vercel functions)
 
-These functions hold the OpenAI/ElevenLabs keys server-side, same as `server/index.js`'s
-`/api/ai` and `/api/tts` today.
+`api/ai.js` and `api/tts.js` hold the OpenAI/ElevenLabs keys server-side, same as
+`server/index.js`'s `/api/ai` and `/api/tts` today — they just run as Vercel
+serverless functions instead of Supabase Edge Functions, so the keys live next to
+the rest of the app's Vercel env config.
 
-```bash
-npm i -g supabase
-supabase login
-supabase link --project-ref <your-project-ref>   # from the project URL
-supabase secrets set OPENAI_API_KEY=sk-...
-supabase secrets set ELEVENLABS_API_KEY=...       # optional, premium voices
-supabase functions deploy ai
-supabase functions deploy tts
+In the Vercel project → **Settings → Environment Variables**, add:
+
 ```
+OPENAI_API_KEY=sk-...
+ELEVENLABS_API_KEY=...       # optional, premium voices
+```
+
+No Supabase CLI or `supabase secrets` needed — these are plain Vercel env vars,
+never sent to the browser (only `api/*.js`, which runs server-side, reads them).
 
 ## 5. Point the app at it
 
