@@ -9,6 +9,7 @@ import {
 import {
   supabase, supabaseConfigured, supaSignup, supaLogin, supaLogout,
   supaGetHousehold, supaPutHousehold, supaResetHousehold, supaAskAI, supaTts,
+  supaJoinHousehold, supaInviteMember, supaListInvites, supaRevokeInvite, supaSetMemberRole,
 } from "./supabase.js";
 import { scoreUtterance } from "./speechScore.js";
 
@@ -701,10 +702,10 @@ const SKILL_LABELS = { vocabulary: "Vocabulary", grammar: "Grammar", speaking: "
 const KID_SKILL_LABELS = { vocabulary: "Word power", grammar: "Sentence power", speaking: "Talking power", comprehension: "Listening power" };
 const cefrOf = s => (s < 22 ? "A1" : s < 40 ? "A2" : s < 58 ? "B1" : s < 75 ? "B2" : "C1");
 
-function newMember({ name, avatar, ageBand, personality, profile, isParent }) {
+function newMember({ id, name, avatar, ageBand, personality, profile, isParent }) {
   const s = seedScore(profile.level);
   return {
-    id: uid(), name, avatar, ageBand, personality, isParent: !!isParent, profile,
+    id: id || uid(), name, avatar, ageBand, personality, isParent: !!isParent, profile,
     voiceURI: null, speed: "normal",
     stats: { xp: 0, streak: 0, lastDay: null, lessons: 0, talks: 0, stories: 0, lastGreet: null },
     deck: [],
@@ -1015,17 +1016,100 @@ function AuthFlow({ household, onSignedIn, onCreated, remote, onRemoteAuth }) {
 }
 const backLink = { display: "block", margin: "16px auto 0", background: "none", border: "none", color: FADE, cursor: "pointer", fontSize: 14 };
 
+/* ─────────── Invite landing: an invited member's first arrival ───────── */
+// Reached via the /app/invite redirect from Supabase's invite email link.
+// inviteUserByEmail only ever establishes a magic-link session (no
+// password), so step 1 is mandatory before the invitee can sign in again
+// normally later. Step 2 hands off into the normal SetupMember wizard so
+// the member object is built by the same newMember() every local member
+// uses — no shape drift between invited and locally-added members.
+function InviteLanding({ onDone }) {
+  const [step, setStep] = useState("password"); // password | profile
+  const [pass, setPass] = useState("");
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [seed, setSeed] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      let memberSeed = null;
+      try {
+        const { data } = await supabase
+          .from("household_invites")
+          .select("member_seed")
+          .eq("email", (user?.email || "").toLowerCase())
+          .eq("status", "accepted")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        memberSeed = data?.member_seed || null;
+      } catch {}
+      setSeed({ id: user?.id, name: memberSeed?.name || user?.user_metadata?.name || "", ...memberSeed });
+    })();
+  }, []);
+
+  const setPassword = async () => {
+    setErr("");
+    if (pass.length < 6) return setErr("Password needs at least 6 characters.");
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pass });
+      if (error) throw error;
+      setStep("profile");
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  if (step === "password") return (
+    <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 30 }}>
+        <Orb accent="#0E7C6B" size={44} active />
+        <div className="f-display" style={{ fontWeight: 700, fontSize: 24, letterSpacing: -0.5 }}>Lingua</div>
+      </div>
+      <h1 className="f-display" style={{ fontSize: 28, fontWeight: 600, marginBottom: 6 }}>You've been invited!</h1>
+      <p className="f-body" style={{ color: FADE, fontSize: 14, marginBottom: 16 }}>
+        Set a password so you can sign back in anytime.
+      </p>
+      <label className="f-body" style={{ fontSize: 13.5, fontWeight: 600, color: FADE }}>Password</label>
+      <div style={{ position: "relative" }}>
+        <input value={pass} onChange={e => setPass(e.target.value)} placeholder="6+ characters"
+          type={show ? "text" : "password"} className="f-body" style={inputStyle} />
+        <button onClick={() => setShow(!show)} aria-label="Show password"
+          style={{ position: "absolute", right: 12, top: 18, background: "none", border: "none", cursor: "pointer" }}>
+          {show ? <EyeOff size={17} color={FADE} /> : <Eye size={17} color={FADE} />}
+        </button>
+      </div>
+      {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13.5, margin: "12px 0" }}>{err}</p>}
+      <div style={{ height: 8 }} />
+      <Btn full accent="#0E7C6B" disabled={busy} onClick={setPassword}>
+        {busy ? <Loader size={16} className="animate-spin" /> : <>Continue <ArrowRight size={16} /></>}
+      </Btn>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: MIST, color: INK }}>
+      <Fonts />
+      <SetupMember role="adult-member"
+        defaults={{ id: seed?.id, name: seed?.name, target: seed?.target, native: seed?.native, goal: seed?.goal, interests: seed?.interests }}
+        onDone={async (m) => { await supaJoinHousehold(m); onDone(); }} />
+    </div>
+  );
+}
+
 /* ──────────────── Member setup (parent's own + child profiles) ───────── */
 
 function SetupMember({ role, context = "family", defaults = {}, onDone, onCancel }) {
-  // role: 'parent' | 'child-or-teen' | 'adult-member'
+  // role: 'parent' | 'child' | 'adult' | 'adult-member' (invited member completing their own profile)
   const isKidFlow = role === "child";
   const [step, setStep] = useState(0);
   const [m, setM] = useState({
     name: defaults.name || "", avatar: null,
-    ageBand: role === "parent" || role === "adult" ? "adult" : "child",
-    target: null, native: defaults.native || "", level: null, goal: null,
-    interests: [], personality: null,
+    ageBand: role === "parent" || role === "adult" || role === "adult-member" ? "adult" : "child",
+    target: defaults.target || null, native: defaults.native || "", level: null, goal: defaults.goal || null,
+    interests: defaults.interests || [], personality: null,
   });
   const [placing, setPlacing] = useState(false);
   const [quiz, setQuiz] = useState(null);
@@ -1039,7 +1123,7 @@ function SetupMember({ role, context = "family", defaults = {}, onDone, onCancel
 
   const finish = (lvl) => {
     onDone(newMember({
-      name: m.name.trim(), avatar: m.avatar || avatars[0], ageBand: m.ageBand,
+      id: defaults.id, name: m.name.trim(), avatar: m.avatar || avatars[0], ageBand: m.ageBand,
       personality: m.personality || personasFor(m.ageBand)[0][0],
       isParent: role === "parent",
       profile: {
@@ -1230,6 +1314,74 @@ function SetupMember({ role, context = "family", defaults = {}, onDone, onCancel
 }
 const h1s = { fontSize: 28, fontWeight: 600, marginBottom: 14, lineHeight: 1.2 };
 const lbl = { fontSize: 13.5, fontWeight: 600, color: FADE };
+
+/* ──────────── Parent side: send an email invite to an adult/teen ─────── */
+
+function InviteSend({ onCancel, onSent }) {
+  const [phase, setPhase] = useState("form"); // form | profile-seed
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [prefill, setPrefill] = useState(false);
+  const [coParent, setCoParent] = useState(false);
+  const [seed, setSeed] = useState(null); // captured from SetupMember when prefill is on
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const send = async (memberSeed) => {
+    setErr(""); setBusy(true);
+    try {
+      await supaInviteMember({
+        email: email.trim(), name: name.trim(),
+        ageBand: "adult", role: coParent ? "owner" : "member",
+        memberSeed: memberSeed || undefined,
+      });
+      onSent();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  if (phase === "profile-seed") return (
+    <SetupMember role="adult-member" defaults={{ name }}
+      onCancel={() => setPhase("form")}
+      onDone={(m) => {
+        const { id, ...memberSeed } = m; // id is assigned to the invitee's own auth.uid() on accept, not here
+        send(memberSeed);
+      }} />
+  );
+
+  return (
+    <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
+        <Orb accent="#0E7C6B" size={38} active={false} />
+        <div className="f-display" style={{ fontWeight: 700, fontSize: 20 }}>Lingua</div>
+        <button onClick={onCancel} className="f-body" style={{ marginLeft: "auto", background: "none", border: "none", color: FADE, cursor: "pointer", fontSize: 14 }}>Cancel</button>
+      </div>
+      <h1 className="f-display" style={h1s}>Invite a family member</h1>
+      <p className="f-body" style={{ color: FADE, marginBottom: 16 }}>
+        They'll get an email to set their own password and sign in with their own login.
+      </p>
+      <label className="f-body" style={lbl}>Their name</label>
+      <input value={name} onChange={e => setName(e.target.value)} className="f-body" style={inputStyle} placeholder="e.g. Dana" />
+      <label className="f-body" style={lbl}>Their email</label>
+      <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="f-body" style={inputStyle} placeholder="them@example.com" />
+
+      <label className="f-body" style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0", cursor: "pointer" }}>
+        <input type="checkbox" checked={prefill} onChange={e => setPrefill(e.target.checked)} />
+        <span>Set up their profile now (language, level, interests)</span>
+      </label>
+      <label className="f-body" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, cursor: "pointer" }}>
+        <input type="checkbox" checked={coParent} onChange={e => setCoParent(e.target.checked)} />
+        <span>Give this person co-parent access <span style={{ color: FADE }}>(parental controls, manage other members — you can change this later)</span></span>
+      </label>
+
+      {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13.5, marginBottom: 12 }}>{err}</p>}
+      <Btn full accent="#0E7C6B" disabled={busy || !name.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)}
+        onClick={() => prefill ? setPhase("profile-seed") : send(null)}>
+        {busy ? <Loader size={16} className="animate-spin" /> : <>{prefill ? "Continue" : "Send invite"} <ArrowRight size={16} /></>}
+      </Btn>
+    </div>
+  );
+}
 
 /* ───────────────────────────── member picker ─────────────────────────── */
 
@@ -2965,7 +3117,28 @@ One entry per person, in the same order. Never invent activity that isn't in the
   );
 }
 
-function FamilyView({ household, accent, onAdd, onSwitch, onRemove, pinNudge, onSetPin, viewerNative, onSaveDigest }) {
+function FamilyView({ household, accent, onAdd, onSwitch, onRemove, pinNudge, onSetPin, viewerNative, onSaveDigest, viewerIsOwner, onSetMemberParent }) {
+  const [invites, setInvites] = useState([]);
+  const [busyRole, setBusyRole] = useState(null);
+  const [roleErr, setRoleErr] = useState("");
+
+  useEffect(() => {
+    if (!viewerIsOwner || !isSupabase()) return;
+    supaListInvites().then(setInvites).catch(() => {});
+  }, [viewerIsOwner, household.members.length]);
+
+  const revoke = async (id) => {
+    try { await supaRevokeInvite(id); setInvites(invites.filter(i => i.id !== id)); } catch {}
+  };
+  const toggleRole = async (m) => {
+    setBusyRole(m.id); setRoleErr("");
+    try {
+      await supaSetMemberRole(m.id, m.isParent ? "member" : "owner");
+      onSetMemberParent(m.id, !m.isParent);
+    } catch (e) { setRoleErr(e.message); }
+    setBusyRole(null);
+  };
+
   return (
     <div>
       <h1 className="f-display" style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Your family</h1>
@@ -2978,6 +3151,11 @@ function FamilyView({ household, accent, onAdd, onSwitch, onRemove, pinNudge, on
         </Card>
       )}
       <WeeklyDigest members={household.members} household={household} accent={accent} viewerNative={viewerNative} onSave={onSaveDigest} />
+      {roleErr && (
+        <Card style={{ padding: 14, marginBottom: 12, background: "#FBEAE4", border: "none" }}>
+          <div className="f-body" style={{ fontSize: 13.5, color: "#A0453A" }}>{roleErr}</div>
+        </Card>
+      )}
       {household.members.map(m => (
         <Card key={m.id} style={{ marginBottom: 12, padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
@@ -2991,9 +3169,28 @@ function FamilyView({ household, accent, onAdd, onSwitch, onRemove, pinNudge, on
             <Btn small ghost onClick={() => onSwitch(m.id)}>Open</Btn>
           </div>
           <AssessmentCard member={m} kidLabels={m.ageBand === "child"} />
-          {!m.isParent && (
-            <button onClick={() => onRemove(m.id)} className="f-body" style={{ background: "none", border: "none", color: "#A0453A", fontSize: 12.5, cursor: "pointer", marginTop: 8 }}>Remove profile</button>
-          )}
+          <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
+            {!m.isParent && (
+              <button onClick={() => onRemove(m.id)} className="f-body" style={{ background: "none", border: "none", color: "#A0453A", fontSize: 12.5, cursor: "pointer" }}>Remove profile</button>
+            )}
+            {viewerIsOwner && m.ageBand !== "child" && (
+              <button onClick={() => toggleRole(m)} disabled={busyRole === m.id} className="f-body" style={{ background: "none", border: "none", color: FADE, fontSize: 12.5, cursor: "pointer" }}>
+                {busyRole === m.id ? "…" : m.isParent ? "Remove co-parent access" : "Make co-parent"}
+              </button>
+            )}
+          </div>
+        </Card>
+      ))}
+      {viewerIsOwner && invites.map(inv => (
+        <Card key={inv.id} style={{ marginBottom: 12, padding: 16, opacity: 0.6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ fontSize: 32 }}>✉️</div>
+            <div style={{ flex: 1 }}>
+              <div className="f-body" style={{ fontWeight: 600, fontSize: 16 }}>{inv.member_seed?.name || inv.email}</div>
+              <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>Invited · pending — {inv.email}</div>
+            </div>
+            <button onClick={() => revoke(inv.id)} className="f-body" style={{ background: "none", border: "none", color: "#A0453A", fontSize: 12.5, cursor: "pointer" }}>Revoke</button>
+          </div>
         </Card>
       ))}
       <Btn full ghost onClick={onAdd}><Plus size={16} /> Add a family member</Btn>
@@ -3265,7 +3462,7 @@ function LinguaApp() {
   const [household, setHousehold] = useState(null);
   const [booted, setBooted] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
-  const [route, setRoute] = useState("auth"); // auth | setup-parent | picker | add-choice | add-member | app
+  const [route, setRoute] = useState("auth"); // auth | invite | setup-parent | picker | add-choice | add-member | invite-send | app
   const [addRole, setAddRole] = useState("child");
   const [activeId, setActiveId] = useState(null);
   const [tab, setTab] = useState("home");
@@ -3276,7 +3473,13 @@ function LinguaApp() {
   const online = useOnline();
   const [pinModal, setPinModal] = useState(null); // {mode,title,onSuccess?|onSet?}
   const [pinOk, setPinOk] = useState(false);      // verified this session (re-locks at picker)
+  const [ownerUserId, setOwnerUserId] = useState(null); // Supabase mode: current auth.uid(), so the owner's own member.id lines up with household_members.user_id
   const voices = useVoices();
+
+  useEffect(() => {
+    if (!isSupabase() || route !== "setup-parent") return;
+    supabase.auth.getUser().then(({ data: { user } }) => setOwnerUserId(user?.id || null));
+  }, [route]);
 
   /** Run fn immediately if no PIN is set or already verified; otherwise ask for it. */
   const requirePin = (title, fn) => {
@@ -3307,6 +3510,13 @@ function LinguaApp() {
   };
 
   useEffect(() => { (async () => {
+    // Invite-email landing: Supabase's magic link redirects here with a live
+    // session but no lingua-token yet — route to InviteLanding instead of
+    // falling through to the normal signed-out AuthFlow.
+    if (isSupabase() && typeof window !== "undefined" && window.location.pathname.startsWith("/app/invite")) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) { setRoute("invite"); setBooted(true); return; }
+    }
     if (isServer()) {
       try { serverCaps = await srv("/api/config"); } catch {}
       if (SRV_TOKEN()) {
@@ -3316,6 +3526,19 @@ function LinguaApp() {
           setHousehold(streakFix(r.data));
           setSignedIn(true);
         } catch { try { localStorage.removeItem("lingua-token"); } catch {} }
+      } else if (isSupabase()) {
+        // Existing Supabase session but no local token (e.g. tab reopened
+        // after a magic-link sign-in) — pull the household straight away.
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          try {
+            const r = await srv("/api/household");
+            versionRef.current = r.version;
+            setHousehold(streakFix(r.data));
+            setSignedIn(true);
+            try { localStorage.setItem("lingua-token", session.access_token); } catch {}
+          } catch {}
+        }
       }
       setBooted(true);
       return;
@@ -3461,6 +3684,24 @@ function LinguaApp() {
   /* ── routing ── */
   if (!booted) return <div className="f-body" style={{ minHeight: "100vh", background: MIST, display: "flex", alignItems: "center", justifyContent: "center" }}><Fonts /><Orb accent="#0E7C6B" size={64} /></div>;
 
+  if (route === "invite") return (
+    <div style={{ minHeight: "100vh", background: MIST, color: INK }}>
+      <Fonts />
+      <InviteLanding onDone={async () => {
+        try {
+          const r = await srv("/api/household");
+          versionRef.current = r.version;
+          setHousehold(streakFix(r.data));
+          const { data: { session } } = await supabase.auth.getSession();
+          try { localStorage.setItem("lingua-token", session?.access_token || ""); } catch {}
+          setSignedIn(true);
+          const mine = r.data.members.find(m => m.id === session?.user?.id);
+          if (mine) enterMember(mine.id); else setRoute("picker");
+        } catch { setRoute("auth"); }
+      }} />
+    </div>
+  );
+
   if (!signedIn) return (
     <div style={{ minHeight: "100vh", background: MIST, color: INK }}>
       <Fonts />
@@ -3487,7 +3728,7 @@ function LinguaApp() {
   if (route === "setup-parent") return (
     <div style={{ minHeight: "100vh", background: MIST, color: INK }}>
       <Fonts />
-      <SetupMember role="parent" context={household?.type} defaults={{ name: household?.account?.name }}
+      <SetupMember role="parent" context={household?.type} defaults={{ name: household?.account?.name, id: ownerUserId }}
         onDone={(m) => {
           persist({ ...household, members: [...household.members, m] });
           if (household.type === "classroom") setRoute("setup-class");
@@ -3534,7 +3775,13 @@ function LinguaApp() {
           ? [["child", "🧑‍🎓", "A young student (5–17)", "Kid-safe tutor · story mode for the little ones"], ["adult", "🧑‍💼", "An adult student", "Full experience with their own tutor"]]
           : [["child", "🧒", "A child or teen", "You manage their profile · kid-safe tutor · story mode"], ["adult", "🧑", "Another adult", "Full experience with their own tutor"]]
         ).map(([r, e, t, d]) => (
-          <Card key={r} onClick={() => { setAddRole(r); setRoute("add-member"); }} style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
+          <Card key={r} onClick={() => {
+            setAddRole(r);
+            // Adults in a family household get a real email invite with
+            // their own login; children (any household type) and classroom
+            // "adult students" keep the existing parent-managed local flow.
+            setRoute(r === "adult" && household.type === "family" ? "invite-send" : "add-member");
+          }} style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
             <span style={{ fontSize: 30 }}>{e}</span>
             <div style={{ flex: 1 }}>
               <div className="f-body" style={{ fontWeight: 600 }}>{t}</div>
@@ -3554,6 +3801,13 @@ function LinguaApp() {
       <SetupMember role={addRole} context={household.type} defaults={{ native: household.members[0]?.profile.native }}
         onCancel={() => setRoute("picker")}
         onDone={(m) => { persist({ ...household, members: [...household.members, m] }); setRoute("picker"); }} />
+    </div>
+  );
+
+  if (route === "invite-send") return (
+    <div style={{ minHeight: "100vh", background: MIST, color: INK }}>
+      <Fonts />
+      <InviteSend onCancel={() => setRoute("add-choice")} onSent={() => setRoute("picker")} />
     </div>
   );
 
@@ -3597,7 +3851,9 @@ function LinguaApp() {
             {tab === "translate" && !kid && <TranslateView member={member} tts={tts} accent={accent} addWords={addWords} />}
             {tab === "family" && isAdult && household.type === "family" && (
               <FamilyView household={household} accent={accent}
+                viewerIsOwner={member.isParent}
                 viewerNative={member.profile.native}
+                onSetMemberParent={(id, isParent) => persist({ ...household, members: household.members.map(m => m.id === id ? { ...m, isParent } : m) })}
                 onSaveDigest={(d) => persist({ ...household, digest: d })}
                 pinNudge={!household.pinHash && household.members.some(m => m.ageBand !== "adult")}
                 onSetPin={startSetPin}

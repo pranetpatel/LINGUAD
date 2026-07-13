@@ -16,11 +16,18 @@ switched with one env var.
 
 ## 2. Apply the schema
 
-In the Supabase dashboard: **SQL Editor → New query**, paste the contents of
-[`supabase/migrations/0001_households.sql`](supabase/migrations/0001_households.sql), run it,
-then paste and run [`0002_household_on_signup.sql`](supabase/migrations/0002_household_on_signup.sql).
-This creates the `households` table with row-level security so each user can only
-ever read/write their own row.
+In the Supabase dashboard: **SQL Editor → New query**, run these three migrations
+in order:
+
+1. [`0001_households.sql`](supabase/migrations/0001_households.sql) — creates the
+   `households` table with row-level security so each user can only ever read/write
+   their own row.
+2. [`0002_household_on_signup.sql`](supabase/migrations/0002_household_on_signup.sql) —
+   auto-creates the household row when the auth user is created.
+3. [`0003_household_membership.sql`](supabase/migrations/0003_household_membership.sql) —
+   adds `household_members`/`household_invites` and rewrites RLS so multiple auth
+   users (an owner + invited family members) can share one household. Required for
+   the email-invite feature in step 6; safe to apply even if you don't use invites.
 
 (If you have the Supabase CLI installed: `supabase link` then `supabase db push` does the same thing.)
 
@@ -86,6 +93,34 @@ speech recognition for Talk mode (best in Chrome/Edge).
   boost.
 - **Deploying the client is unchanged** — still a static Vite build to Vercel/any
   CDN. Only the backend moved.
+
+## 6. Inviting family members (optional)
+
+Adults/teens can be invited by email instead of being added as a local profile —
+they get their own login, linked to the same household. This needs one more
+server-only secret, since sending an invite requires Supabase's admin API:
+
+1. **Project Settings → API → service_role** (marked secret) — copy it.
+2. In the Vercel project → **Settings → Environment Variables**, add:
+
+   ```
+   SUPABASE_SERVICE_ROLE_KEY=eyJ...     # server-only — never prefix with VITE_, never put in local .env
+   SITE_URL=https://your-deployed-domain.com
+   ```
+
+   `SUPABASE_SERVICE_ROLE_KEY` has full admin access to the database and bypasses
+   RLS — it must only ever live in Vercel's env config (used by `api/invite.js`,
+   which never returns it to the browser), the same trust boundary as
+   `OPENAI_API_KEY` today.
+3. **Authentication → URL Configuration → Redirect URLs** — add
+   `https://your-deployed-domain.com/app/invite` to the allowlist, so Supabase's
+   invite email is allowed to redirect back into the app.
+4. Redeploy. From **Family → Add a family member → Another adult**, the invite
+   form sends a real email via Supabase's built-in mailer.
+
+Supabase's default mailer is rate-limited and meant for development/demos — for
+real invite volume, configure a custom SMTP provider under **Authentication →
+Emails** in the dashboard (not an app code change).
 
 ## Rolling back
 
