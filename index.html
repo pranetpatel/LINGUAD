@@ -1,27 +1,434 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Lingua — your family's AI language tutor · lingua.family</title>
-    <meta name="description" content="Voice-first AI language tutoring for families and classrooms. Real conversations, generated lessons, story time for kids, and progress every parent can see." />
-    <link rel="canonical" href="https://www.lingua.family/" />
-    <meta property="og:title" content="Lingua — your family's AI language tutor" />
-    <meta property="og:description" content="Real spoken conversations with AI tutors, lessons built around each learner, story time for kids — one app for the whole family." />
-    <meta property="og:url" content="https://www.lingua.family/" />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://www.lingua.family/icon-512.png" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="theme-color" content="#0E7C6B" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icon-192.png" />
-    <link rel="apple-touch-icon" href="/icon-192.png" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Lingua" />
-  </head>
-  <body style="margin:0">
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lingua — your family's AI language tutor</title>
+<meta name="description" content="Real spoken conversations with AI tutors for every member of your family, ages 5 to adult. Kid-safe characters, pronunciation scoring, and progress parents can actually see." />
+<link rel="canonical" href="https://lingua.family/" />
+<meta property="og:title" content="Lingua — the whole family, actually speaking" />
+<meta property="og:description" content="Voice-first AI language tutoring for families. Talk, don't tap." />
+<meta property="og:url" content="https://lingua.family/" />
+<link rel="icon" href="/icon-192.png" />
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Albert+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+:root{
+  --mist:#F1F5F3; --ink:#152521; --teal:#0E7C6B; --teal-soft:#E3F1EE;
+  --coral:#D95B3F; --coral-soft:#FBEAE4; --gold:#D9A441; --gold-soft:#FAF0DA;
+  --line:#DCE5E1; --fade:#5C6B66; --white:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Albert Sans',system-ui,sans-serif;background:var(--mist);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased}
+.display{font-family:'Fraunces',serif}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--teal);text-transform:uppercase;margin-bottom:14px}
+.btn{display:inline-flex;align-items:center;gap:8px;font:600 15px 'Albert Sans';padding:14px 24px;border-radius:999px;border:none;cursor:pointer;text-decoration:none;transition:transform .15s ease, box-shadow .15s ease}
+.btn:hover{transform:translateY(-1px)}
+.btn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.btn-primary{background:var(--teal);color:#fff;box-shadow:0 8px 20px rgba(14,124,107,.28)}
+.btn-ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+.btn-ink{background:var(--ink);color:var(--gold)}
+
+/* ── nav ── */
+nav{position:sticky;top:0;z-index:50;background:rgba(241,245,243,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav-in{display:flex;align-items:center;gap:28px;height:64px}
+.mark{display:flex;align-items:center;gap:10px;font:700 19px 'Fraunces';letter-spacing:-.02em;text-decoration:none}
+.nav-links{display:flex;gap:22px;margin-left:auto}
+.nav-links a{font-size:14px;font-weight:500;color:var(--fade);text-decoration:none}
+.nav-links a:hover{color:var(--ink)}
+.nav-cta{margin-left:6px;padding:10px 18px;font-size:14px}
+@media(max-width:760px){.nav-links{display:none}}
+
+/* ── the orb ── */
+.orb{position:relative;border-radius:50%;background:radial-gradient(circle at 34% 30%, #1D9A85 0%, #0E7C6B 45%, #0B4A40 100%);box-shadow:0 14px 40px rgba(14,124,107,.35), inset 0 -8px 24px rgba(0,0,0,.25);animation:breathe 4.2s ease-in-out infinite}
+.orb::after{content:"";position:absolute;width:26%;height:26%;border-radius:50%;right:14%;bottom:16%;background:radial-gradient(circle at 35% 30%, #EECB85, #D9A441 70%);box-shadow:0 0 22px rgba(217,164,65,.65)}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+
+/* ── hero ── */
+.hero{padding:76px 0 64px}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+@media(max-width:880px){.hero-grid{grid-template-columns:1fr;gap:40px}}
+h1{font:600 clamp(38px,5.2vw,58px)/1.08 'Fraunces';letter-spacing:-.02em}
+h1 em{font-style:italic;color:var(--teal)}
+.hero p.lede{margin:20px 0 28px;font-size:18px;color:var(--fade);max-width:46ch}
+.hero-ctas{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.microline{margin-top:18px;font-size:13px;color:var(--fade)}
+.microline b{color:var(--ink)}
+
+/* the conversation stage — the signature */
+.stage{background:var(--white);border:1px solid var(--line);border-radius:26px;padding:30px 28px 26px;box-shadow:0 24px 60px rgba(21,37,33,.10)}
+.stage-top{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.stage-top .orb{width:52px;height:52px}
+.stage-top .who{font:600 16px 'Albert Sans'}
+.stage-top .who span{display:block;font-size:12px;font-weight:500;color:var(--fade)}
+.convo-scroll{height:300px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;padding:2px 2px 4px}
+.convo-scroll::-webkit-scrollbar{display:none}
+.listen-row{height:32px;margin-top:10px;display:flex;align-items:center}
+@media(max-width:880px){.convo-scroll{height:250px}}
+.live{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;letter-spacing:.1em;color:var(--teal)}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--teal);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.bubble{max-width:88%;padding:13px 16px;border-radius:16px;font-size:15px;line-height:1.45;margin-bottom:12px;opacity:0;transform:translateY(8px);animation:pop .45s ease forwards}
+.bubble.tutor{background:var(--teal-soft);border-bottom-left-radius:5px}
+.bubble.me{background:var(--mist);margin-left:auto;border-bottom-right-radius:5px}
+.bubble .tr{display:block;font-size:12.5px;color:var(--fade);margin-top:3px;font-style:italic}
+@keyframes pop{to{opacity:1;transform:none}}
+.clarity{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--teal);background:var(--white);border:1px solid var(--line);border-radius:999px;padding:4px 11px;margin:0 0 12px auto;opacity:0;animation:pop .4s .15s ease forwards}
+.clarity-row{display:flex}
+.bars{display:flex;align-items:flex-end;gap:4px;height:26px;margin-top:6px}
+.bars i{width:5px;border-radius:3px;background:var(--teal);animation:bounce 1s ease-in-out infinite}
+.bars i:nth-child(1){animation-delay:0s}.bars i:nth-child(2){animation-delay:.12s}.bars i:nth-child(3){animation-delay:.24s}.bars i:nth-child(4){animation-delay:.36s}.bars i:nth-child(5){animation-delay:.48s}.bars i:nth-child(6){animation-delay:.6s}.bars i:nth-child(7){animation-delay:.72s}
+@keyframes bounce{0%,100%{height:7px;opacity:.5}50%{height:24px;opacity:1}}
+.listening{display:flex;align-items:center;gap:12px;color:var(--fade);font-size:12.5px;font-weight:700;letter-spacing:.08em;visibility:hidden}
+.listening.on{visibility:visible}
+
+/* ── ribbon ── */
+.ribbon{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--white)}
+.ribbon-in{display:flex;gap:10px 34px;flex-wrap:wrap;justify-content:center;padding:16px 0;font-size:13.5px;font-weight:600;color:var(--fade)}
+.ribbon-in span b{color:var(--teal)}
+
+/* ── sections ── */
+section{padding:84px 0}
+h2{font:600 clamp(28px,3.6vw,40px)/1.15 'Fraunces';letter-spacing:-.015em;max-width:22ch}
+.section-sub{margin-top:14px;font-size:16.5px;color:var(--fade);max-width:58ch}
+.reveal{opacity:0;transform:translateY(16px);transition:opacity .6s ease, transform .6s ease}
+.reveal.in{opacity:1;transform:none}
+
+/* loop steps — a real sequence, so numbers mean something */
+.loop{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px}
+@media(max-width:880px){.loop{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.loop{grid-template-columns:1fr}}
+.step{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:24px 20px}
+.step .n{font:700 13px 'Fraunces';color:var(--gold)}
+.step h3{font:600 18px 'Albert Sans';margin:8px 0 6px}
+.step p{font-size:13.5px;color:var(--fade)}
+
+/* tutors */
+.cast{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-top:40px}
+.tutor{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:20px 18px;transition:transform .15s ease, box-shadow .15s ease}
+.tutor:hover{transform:translateY(-3px);box-shadow:0 14px 30px rgba(21,37,33,.08)}
+.tutor .face{font-size:30px}
+.tutor h3{font:600 16px 'Albert Sans';margin:8px 0 2px}
+.tutor p{font-size:12.5px;color:var(--fade)}
+.tutor .tag{display:inline-block;margin-top:9px;font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--coral);background:var(--coral-soft);border-radius:999px;padding:3px 9px}
+.tutor .tag.adult{color:var(--teal);background:var(--teal-soft)}
+
+/* family split */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center;margin-top:44px}
+@media(max-width:880px){.split{grid-template-columns:1fr;gap:36px}}
+.digest{background:var(--white);border:1px solid var(--line);border-radius:22px;padding:24px;box-shadow:0 20px 46px rgba(21,37,33,.08)}
+.digest .dh{font-size:11.5px;font-weight:700;letter-spacing:.12em;color:var(--fade);margin-bottom:12px}
+.digest .row{border-top:1px solid var(--mist);padding:12px 0}
+.digest .row b{font-size:14px}
+.digest .row p{font-size:13px;color:var(--fade);margin-top:2px}
+.digest .tip{font-size:12.5px;color:#8A6A1F;margin-top:4px}
+.feature-list p{margin:0 0 18px;font-size:15.5px}
+.feature-list p b{display:block;font-size:16.5px;margin-bottom:2px}
+.feature-list p span{color:var(--fade);font-size:14.5px}
+
+/* kids band */
+.band{background:var(--ink);color:var(--mist);border-radius:32px;padding:64px 48px;margin:0 24px}
+@media(max-width:760px){.band{padding:44px 26px;margin:0 12px}}
+.band-in{max-width:1032px;margin:0 auto}
+.band h2{color:#fff}
+.band .section-sub{color:#9FB8B1}
+.band-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+@media(max-width:760px){.band-grid{grid-template-columns:1fr}}
+.band-card{background:#1E332D;border-radius:18px;padding:22px}
+.band-card .bi{font-size:26px}
+.band-card h3{font:600 16.5px 'Albert Sans';margin:10px 0 5px;color:#fff}
+.band-card p{font-size:13.5px;color:#C9D8D3}
+.band .promise{margin-top:34px;text-align:center;font:italic 600 17px 'Fraunces';color:var(--gold)}
+
+/* pricing */
+.plans{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px}
+@media(max-width:980px){.plans{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.plans{grid-template-columns:1fr}}
+.plan{background:var(--white);border:1.5px solid var(--line);border-radius:22px;padding:26px 22px;display:flex;flex-direction:column}
+.plan.featured{border-color:var(--teal);box-shadow:0 20px 48px rgba(14,124,107,.16);position:relative}
+.plan .flag{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--teal);color:#fff;font-size:11px;font-weight:700;letter-spacing:.08em;border-radius:999px;padding:4px 12px}
+.plan h3{font:600 17px 'Albert Sans'}
+.plan .price{font:600 34px 'Fraunces';margin:10px 0 2px}
+.plan .price small{font:500 13px 'Albert Sans';color:var(--fade)}
+.plan p{font-size:13.5px;color:var(--fade);margin:8px 0 18px;flex:1}
+.plan .btn{justify-content:center}
+.anchor-line{margin-top:26px;text-align:center;font-size:14px;color:var(--fade)}
+.anchor-line b{color:var(--ink)}
+
+/* faq */
+.faq{max-width:720px;margin:40px auto 0}
+details{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:18px 22px;margin-bottom:12px}
+summary{font-weight:600;font-size:15.5px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::after{content:"+";font:400 22px 'Fraunces';color:var(--teal)}
+details[open] summary::after{content:"–"}
+details p{margin-top:10px;font-size:14.5px;color:var(--fade)}
+
+/* footer */
+footer{background:var(--ink);color:#9FB8B1;margin-top:84px;padding:48px 0}
+.foot-in{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.foot-in .mark{color:#fff}
+.foot-links{margin-left:auto;display:flex;gap:20px;font-size:13.5px}
+.foot-links a{text-decoration:none}
+.foot-links a:hover{color:#fff}
+.foot-note{margin-top:18px;font-size:12.5px}
+
+@media (prefers-reduced-motion: reduce){
+  .orb,.bars i,.live i{animation:none}
+  .bubble,.clarity{animation:none;opacity:1;transform:none}
+  .reveal{opacity:1;transform:none;transition:none}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-in">
+    <a class="mark" href="#top"><span class="orb" style="width:30px;height:30px;animation:none"></span>Lingua</a>
+    <div class="nav-links">
+      <a href="#loop">How it works</a>
+      <a href="#tutors">Tutors</a>
+      <a href="#family">Family</a>
+      <a href="#teachers">Teachers</a>
+      <a href="#pricing">Pricing</a>
+    </div>
+    <a class="btn btn-primary nav-cta" href="/app">Start free</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow">EN ↔ ES · ages 5 to adult</div>
+      <h1>The whole family, <em>actually speaking.</em></h1>
+      <p class="lede">Lingua is a voice-first AI tutor for every member of your household. Tap once and talk — Mila talks back, listens again, and saves the corrections for the end. Like a phone call, not a quiz.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="/app">Start free — no card</a>
+        <a class="btn btn-ghost" href="#loop">See how it works</a>
+      </div>
+      <p class="microline"><b>No streak guilt. No kid faces. No tapping green buttons.</b> Just minutes spent speaking — the one thing that produces fluency.</p>
+    </div>
+
+    <div class="stage" aria-label="A sample Lingua conversation">
+      <div class="stage-top">
+        <span class="orb"></span>
+        <div class="who">Mila <span>your Spanish tutor · warm &amp; encouraging</span></div>
+        <div class="live"><i></i>LIVE</div>
+      </div>
+      <div class="convo-scroll" id="convoScroll">
+        <div id="convo"></div>
+      </div>
+      <div class="listen-row">
+        <div class="listening" id="listening">
+          <div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          LISTENING — GO AHEAD
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="ribbon">
+  <div class="wrap ribbon-in">
+    <span><b>Hands-free</b> conversations</span>
+    <span><b>Word-by-word</b> pronunciation scores</span>
+    <span><b>Kid-safe</b> animal tutors</span>
+    <span><b>5 profiles</b>, one family plan</span>
+    <span><b>Weekly digest</b> for parents</span>
+  </div>
+</div>
+
+<section id="loop">
+  <div class="wrap">
+    <div class="eyebrow reveal">How it works</div>
+    <h2 class="reveal">The loop that produces fluency</h2>
+    <p class="section-sub reveal">Gamified apps reward tapping. Fluency comes from production — speaking and being understood. Every Lingua session runs this loop, and every turn updates your skills.</p>
+    <div class="loop">
+      <div class="step reveal"><div class="n">STEP 1</div><h3>Speak</h3><p>Pick a scenario — ordering food, a job interview, a dragon adventure. The mic opens itself. Just talk.</p></div>
+      <div class="step reveal"><div class="n">STEP 2</div><h3>Your tutor answers</h3><p>Mila leads the scene, plays every character, and stretches your level — out loud, in a human voice.</p></div>
+      <div class="step reveal"><div class="n">STEP 3</div><h3>Debrief</h3><p>Corrections wait until the end so the conversation flows. Then practice each fix aloud, scored word by word.</p></div>
+      <div class="step reveal"><div class="n">STEP 4</div><h3>Skills move</h3><p>Speaking, comprehension, vocabulary, and grammar update live — progress you can see, not a gem count.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="tutors" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow reveal">Meet the tutors</div>
+    <h2 class="reveal">A tutor who remembers you</h2>
+    <p class="section-sub reveal">Each tutor keeps a memory of your level, your interests, and the mistakes you're working on. Switch tutors — or voices, or speaking speed — any time, even mid-conversation.</p>
+    <div class="cast">
+      <div class="tutor reveal"><div class="face">🌿</div><h3>Mila</h3><p>Warm and encouraging. Specific praise, gentle humor.</p><span class="tag adult">ADULTS</span></div>
+      <div class="tutor reveal"><div class="face">🌊</div><h3>Noah</h3><p>Calm and patient. Never rushes a sentence.</p><span class="tag adult">ADULTS</span></div>
+      <div class="tutor reveal"><div class="face">🔥</div><h3>Leo</h3><p>An energetic coach. Momentum and honest feedback.</p><span class="tag adult">ADULTS</span></div>
+      <div class="tutor reveal"><div class="face">✨</div><h3>Zoe</h3><p>Chill, a little funny, zero cringe.</p><span class="tag adult">TEENS</span></div>
+      <div class="tutor reveal"><div class="face">⚡</div><h3>Kai</h3><p>Upbeat, playful, competitive energy.</p><span class="tag adult">TEENS</span></div>
+      <div class="tutor reveal"><div class="face">🦊</div><h3>Pip</h3><p>A silly, giggly fox. Cheers for every try.</p><span class="tag">KIDS</span></div>
+      <div class="tutor reveal"><div class="face">🐰</div><h3>Luna</h3><p>A gentle bunny. Soft-spoken and kind.</p><span class="tag">KIDS</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="family" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow reveal">Built for households</div>
+    <h2 class="reveal">One home. Five learners. Progress you can see.</h2>
+    <div class="split">
+      <div class="feature-list reveal">
+        <p><b>Profiles for everyone</b><span>Netflix-style picker, ages 5 to adult. Each member gets their own tutor, level, and goals.</span></p>
+        <p><b>A parent PIN that means it</b><span>Adding, editing, or removing profiles is locked behind your PIN on shared devices.</span></p>
+        <p><b>The weekly digest</b><span>Every Sunday, a short human-readable summary of what each member actually learned — even if you don't speak the language yourself.</span></p>
+        <p><b>Invite Abuela</b><span>A free Listener seat lets grandparents hear milestone moments and send a voice reaction back.</span></p>
+      </div>
+      <div class="digest reveal" aria-label="Example weekly digest">
+        <div class="dh">📬 WEEKLY DIGEST · THE RIVERA FAMILY</div>
+        <div class="row"><b>🦊 Sofía, 7</b><p>Held her longest conversation yet with Pip — 4 minutes about a lost puppy. New words: perro, parque, feliz.</p><p class="tip">💡 Try story time twice this week — she asks for it.</p></div>
+        <div class="row"><b>✨ Mateo, 14</b><p>Comprehension jumped after three listening-lab sessions. Still mixing up ser and estar.</p><p class="tip">💡 A 5-minute review before dinner clears his due words.</p></div>
+        <div class="row"><b>🌿 Dana</b><p>82% average speaking clarity across 6 conversations. The rolled rr is coming along.</p><p class="tip">💡 Say-it practice on "perro" twice more and it's locked in.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="band">
+  <div class="band-in">
+    <div class="eyebrow" style="color:var(--gold)">For the kids</div>
+    <h2>The language app that doesn't want your kid's face</h2>
+    <p class="section-sub">Children get Pip the fox or Luna the bunny — with boy and girl kid voices, story time, and stars instead of scores. And a set of rules we don't bend.</p>
+    <div class="band-grid">
+      <div class="band-card"><div class="bi">🔒</div><h3>Safe by design</h3><p>Hard safety rails in every kid conversation. Nothing scary, nothing grown-up, and the tutor never asks for personal information.</p></div>
+      <div class="band-card"><div class="bi">🎙️</div><h3>Voice, not camera</h3><p>Milestone moments are shared as your child's voice over an animated scene. No camera, no faces, sharing off by default — always a parent's choice.</p></div>
+      <div class="band-card"><div class="bi">⭐</div><h3>Stars, not streaks</h3><p>No guilt mechanics, no kid-targeted notifications. Encouragement that celebrates trying, from a fox who thinks your kid is great.</p></div>
+    </div>
+    <p class="promise">Children ask for Pip by name. We intend to keep deserving that.</p>
+  </div>
+</div>
+
+<section id="teachers">
+  <div class="wrap">
+    <div class="eyebrow reveal">For classrooms</div>
+    <h2 class="reveal">Thirty students. One mouth. Solved.</h2>
+    <p class="section-sub reveal">Every student gets a speaking partner; you get rosters, assignments that complete themselves, and per-student assessment across four skills. Founding Classrooms run free for the year.</p>
+    <div style="margin-top:28px" class="reveal">
+      <a class="btn btn-ink" href="/app">Start a free pilot classroom</a>
+    </div>
+  </div>
+</section>
+
+<section id="pricing" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow reveal">Pricing</div>
+    <h2 class="reveal">Less than one hour with a human tutor. For everyone. All month.</h2>
+    <div class="plans">
+      <div class="plan reveal"><h3>Free</h3><div class="price">$0</div><p>One profile with a daily speaking-minutes cap. The real product, bounded — no card required.</p><a class="btn btn-ghost" href="/app">Start free</a></div>
+      <div class="plan reveal"><h3>Plus</h3><div class="price">$12.99<small>/mo</small></div><p>One learner, everything unlocked: unlimited conversations, premium voices, full assessment.</p><a class="btn btn-ghost" href="/app">Choose Plus</a></div>
+      <div class="plan featured reveal"><span class="flag">MOST POPULAR</span><h3>Family</h3><div class="price">$24.99<small>/mo</small></div><p>Up to 5 profiles. Kid tutors, parent PIN, weekly digest, grandparent Listener seat.</p><a class="btn btn-primary" href="/app">Start your family</a></div>
+      <div class="plan reveal"><h3>Schools</h3><div class="price" style="font-size:24px;padding-top:8px">Per classroom</div><p>Rosters, assignments, student assessment. First pilot classroom free for a semester.</p><a class="btn btn-ghost" href="mailto:schools@lingua.family">Talk to us</a></div>
+    </div>
+    <p class="anchor-line reveal">Annual plans include <b>two months free</b>. Compare: a single hour with a marketplace tutor runs $15–40 — for one person.</p>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow reveal" style="text-align:center">Questions</div>
+    <h2 class="reveal" style="margin:0 auto;text-align:center">Fair questions, straight answers</h2>
+    <div class="faq">
+      <details class="reveal"><summary>Why not just use ChatGPT's voice mode?</summary><p>You can, and it's a fine generalist. Lingua is a tutor: it remembers your level and your error history, scores pronunciation word by word, runs a curriculum, keeps kid conversations inside hard safety rails, and gives parents visibility. None of that exists in a general chatbot.</p></details>
+      <details class="reveal"><summary>Does it really work for a 6-year-old?</summary><p>Kids get their own interface: bigger buttons, a fox or bunny tutor with a kid voice, story time, and stars. One tap starts the whole conversation, and the mic re-opens by itself after the tutor speaks — designed so an early reader can use it alone.</p></details>
+      <details class="reveal"><summary>What languages are available?</summary><p>English and Spanish at launch, in both directions. French, German, and Japanese are next — languages are content modules in our architecture, so the roadmap moves quickly.</p></details>
+      <details class="reveal"><summary>What do you do with my child's data?</summary><p>As little as possible. No ads, no data sales, sharing features off by default and gated behind a parent PIN, and milestone clips are voice-over-animation — we never record or request your child's face.</p></details>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-in">
+      <a class="mark" href="#top"><span class="orb" style="width:26px;height:26px;animation:none"></span>Lingua</a>
+      <div class="foot-links">
+        <a href="#loop">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a href="mailto:hello@lingua.family">hello@lingua.family</a>
+      </div>
+    </div>
+    <p class="foot-note">© 2026 Lingua · lingua.family · The whole family, actually speaking.</p>
+  </div>
+</footer>
+
+<script>
+/* The signature: a looping staged conversation with clarity scoring. */
+(function(){
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const convo = document.getElementById('convo');
+  const scroller = document.getElementById('convoScroll');
+  const listening = document.getElementById('listening');
+  const toBottom = (smooth) => requestAnimationFrame(() =>
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }));
+  const script = [
+    {who:'tutor', text:'¡Hola! Estás en un café en Oaxaca. ¿Qué te gustaría pedir?', tr:'Hi! You’re in a café in Oaxaca. What would you like to order?'},
+    {who:'me', text:'Eh… quiero un café con leche, por favor.', clarity:'🎯 Clarity 86% — crisp'},
+    {who:'tutor', text:'¡Perfecto! ¿Algo para comer también? Los tamales están muy buenos hoy.', tr:'Perfect! Anything to eat? The tamales are very good today.'},
+    {who:'me', text:'Sí — un tamal de mole, y… ¿cuánto cuesta?', clarity:'🎯 Clarity 91% — crisp'},
+    {who:'tutor', text:'Cincuenta pesos. ¡Muy bien pedido! Mm, casi como un local.', tr:'Fifty pesos. Nicely ordered! Mm, almost like a local.'}
+  ];
+  if (reduce){
+    script.forEach(l => addLine(l, true));
+    return; // static transcript, scrollable within the window
+  }
+  let i = 0;
+  function addLine(l, instant){
+    const b = document.createElement('div');
+    b.className = 'bubble ' + (l.who === 'tutor' ? 'tutor' : 'me');
+    b.innerHTML = l.text + (l.tr ? '<span class="tr">' + l.tr + '</span>' : '');
+    convo.appendChild(b);
+    if (l.clarity){
+      const row = document.createElement('div');
+      row.className = 'clarity-row';
+      row.innerHTML = '<span class="clarity">' + l.clarity + '</span>';
+      convo.appendChild(row);
+    }
+    if (instant){ b.style.animation = 'none'; b.style.opacity = 1; b.style.transform = 'none'; }
+    if (!instant) toBottom(true);
+  }
+  function tick(){
+    if (i < script.length){
+      const line = script[i++];
+      listening.classList.remove('on');
+      addLine(line);
+      const next = script[i];
+      if (next && next.who === 'me'){
+        setTimeout(() => { listening.classList.add('on'); toBottom(true); }, 1400);
+        setTimeout(tick, 3000);
+      } else {
+        setTimeout(tick, 2900);
+      }
+    } else {
+      setTimeout(() => {
+        convo.innerHTML = '';
+        listening.classList.remove('on');
+        scroller.scrollTop = 0;
+        i = 0; tick();
+      }, 4200);
+    }
+  }
+  tick();
+})();
+
+/* Scroll reveals */
+(function(){
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.querySelectorAll('.reveal').forEach(el => el.classList.add('in'));
+    return;
+  }
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
+  }), { threshold: .12 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+})();
+</script>
+</body>
 </html>

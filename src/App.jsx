@@ -2799,7 +2799,7 @@ function AssessmentCard({ member, kidLabels = false }) {
   );
 }
 
-function ProfileView({ member, household, accent, tts, voices, update, reset, switchMember, upgrade, pin, saveElevenKey }) {
+function ProfileView({ member, household, accent, tts, voices, update, reset, switchMember, signOut, upgrade, pin, saveElevenKey }) {
   const kid = member.ageBand === "child";
   const individual = household.type === "individual";
   const p = member.profile, s = member.stats;
@@ -3039,6 +3039,10 @@ function ProfileView({ member, household, accent, tts, voices, update, reset, sw
           </p>
           <Btn small accent={accent} onClick={upgrade}><Plus size={15} /> Upgrade & add a member</Btn>
         </Card>
+      )}
+
+      {!kid && (
+        <Btn full ghost onClick={signOut} style={{ marginBottom: member.isParent ? 10 : 0 }}><LogOut size={15} /> Sign out</Btn>
       )}
 
       {!kid && member.isParent && (
@@ -3888,6 +3892,7 @@ function LinguaApp() {
                 saveElevenKey={(k) => persist({ ...household, elevenKey: k })}
                 upgrade={() => { persist({ ...household, type: "family" }); setRoute("add-choice"); }}
                 switchMember={() => { tts.stop(); setPinOk(false); setRoute("picker"); }}
+                signOut={() => { tts.stop(); if (isSupabase()) supaLogout(); try { localStorage.removeItem("lingua-token"); } catch {} setSignedIn(false); setActiveId(null); setPinOk(false); setRoute("auth"); }}
                 reset={() => requirePin(`${pinWord} PIN required to delete everything`, async () => {
                   if (isServer()) {
                     try { await srv("/api/household", { method: "DELETE" }); } catch {}
