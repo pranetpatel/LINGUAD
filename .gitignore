@@ -6,5 +6,8 @@ server/data/
 *.log
 
 .vercel
+supabase/.temp/
 
 lingua-app/
+
+.vercel
