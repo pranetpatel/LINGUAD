@@ -398,13 +398,13 @@ footer{background:var(--ink);color:#9FB8B1;margin-top:84px;padding:48px 0}
     if (i < script.length){
       const line = script[i++];
       listening.classList.remove('on');
-      addLine(line);
+      addLine(line, i === 1); // first line appears instantly so the demo looks alive
       const next = script[i];
       if (next && next.who === 'me'){
         setTimeout(() => { listening.classList.add('on'); toBottom(true); }, 1400);
         setTimeout(tick, 3000);
       } else {
-        setTimeout(tick, 2900);
+        setTimeout(tick, i === 1 ? 2200 : 2900);
       }
     } else {
       setTimeout(() => {
