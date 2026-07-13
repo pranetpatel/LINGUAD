@@ -32,17 +32,48 @@ async function authedFetch(path, body) {
 }
 
 export async function supaSignup({ name, email, password, type }) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { name, type } },
+  });
   if (error) throw Object.assign(new Error(error.message), { status: error.status || 400 });
   const accountId = data.user?.id;
   if (!accountId) throw new Error("Sign-up didn't return a user (check email confirmation settings)");
+
+  // RLS policies require auth.uid() = account_id. signUp often returns no session
+  // when email confirmation is enabled, so the insert would fail with an RLS error.
+  let session = data.session;
+  if (!session) {
+    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInErr) {
+      const needsConfirm = /confirm/i.test(signInErr.message);
+      throw Object.assign(
+        new Error(needsConfirm
+          ? "Account created — check your email to confirm, then sign in."
+          : signInErr.message),
+        { status: signInErr.status || 400 },
+      );
+    }
+    session = signInData.session;
+  }
+
   const init = freshHousehold(name, email, type);
+  const { data: existing, error: selErr } = await supabase
+    .from("households")
+    .select("version, data")
+    .eq("account_id", accountId)
+    .maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+  if (existing) {
+    return { token: session?.access_token || accountId, version: existing.version, data: existing.data };
+  }
   const { error: insErr } = await supabase.from("households").insert({ account_id: accountId, version: 1, data: init });
   if (insErr) throw new Error(insErr.message);
   // App.jsx stores this in localStorage as a boot-time "am I signed in" flag;
   // the real credential Supabase calls actually use is its own session, kept
   // internally by supabase-js — this token is never sent anywhere by us.
-  return { token: data.session?.access_token || accountId, version: 1, data: init };
+  return { token: session?.access_token || accountId, version: 1, data: init };
 }
 
 export async function supaLogin({ email, password }) {
@@ -52,7 +83,11 @@ export async function supaLogin({ email, password }) {
   let { data: row, error: selErr } = await supabase.from("households").select("version, data").eq("account_id", accountId).maybeSingle();
   if (selErr) throw new Error(selErr.message);
   if (!row) {
-    const init = freshHousehold(data.user.user_metadata?.name || "", email, "family");
+    const init = freshHousehold(
+      data.user.user_metadata?.name || "",
+      email,
+      data.user.user_metadata?.type || "family",
+    );
     const { error: insErr } = await supabase.from("households").insert({ account_id: accountId, version: 1, data: init });
     if (insErr) throw new Error(insErr.message);
     row = { version: 1, data: init };

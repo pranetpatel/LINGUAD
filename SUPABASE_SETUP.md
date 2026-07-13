@@ -17,17 +17,22 @@ switched with one env var.
 ## 2. Apply the schema
 
 In the Supabase dashboard: **SQL Editor → New query**, paste the contents of
-[`supabase/migrations/0001_households.sql`](supabase/migrations/0001_households.sql), and run it.
+[`supabase/migrations/0001_households.sql`](supabase/migrations/0001_households.sql), run it,
+then paste and run [`0002_household_on_signup.sql`](supabase/migrations/0002_household_on_signup.sql).
 This creates the `households` table with row-level security so each user can only
 ever read/write their own row.
 
 (If you have the Supabase CLI installed: `supabase link` then `supabase db push` does the same thing.)
 
-## 3. Turn off email confirmation (for today's demo)
+## 3. Auth settings
 
-**Authentication → Providers → Email** → turn off "Confirm email". Otherwise every
-signup needs a click-through email before the account can sign in — fine for
-production, annoying mid-demo. Turn it back on before real users show up.
+**For demos / internal testing:** **Authentication → Providers → Email** → turn off
+"Confirm email". Otherwise signup needs a click-through email before sign-in.
+
+**For production with email confirmation on:** run the second migration
+[`0002_household_on_signup.sql`](supabase/migrations/0002_household_on_signup.sql)
+as well — it auto-creates the household row when the auth user is created, so
+signup doesn't hit an RLS error while waiting for email confirmation.
 
 ## 4. Configure the AI/TTS proxy (Vercel functions)
 
