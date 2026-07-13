@@ -25,9 +25,19 @@ const getApiKey = () => { try { return localStorage.getItem("lingua-openai-key")
 const hasAiAccess = () => { try { return !!(getApiKey() || localStorage.getItem("lingua-skip-key")); } catch { return true; } };
 
 // ── Lingua server mode: multi-device sync + server-held keys ──
-const SRV_URL = () => { try { return (localStorage.getItem("lingua-server-url") || "").replace(/\/+$/, ""); } catch { return ""; } };
+// The backend (server/) deploys separately from the static frontend, so its
+// URL comes from a build-time env var. localStorage can still override it
+// for local testing against a different backend.
+const SRV_URL = () => {
+  try {
+    const stored = (localStorage.getItem("lingua-server-url") || "").replace(/\/+$/, "");
+    if (stored) return stored;
+  } catch {}
+  if (import.meta.env.VITE_SERVER_URL) return import.meta.env.VITE_SERVER_URL.replace(/\/+$/, "");
+  return typeof window !== "undefined" ? window.location.origin : "";
+};
 const SRV_TOKEN = () => { try { return localStorage.getItem("lingua-token") || ""; } catch { return ""; } };
-const APP_MODE = () => { try { return localStorage.getItem("lingua-mode") || ""; } catch { return ""; } };
+const APP_MODE = () => { try { return localStorage.getItem("lingua-mode") || "server"; } catch { return "server"; } };
 const isServer = () => APP_MODE() === "server" && !!SRV_URL();
 let serverCaps = { ai: false, tts: false, stt: false, streamingAsr: false };
 async function srv(path, { method = "GET", body } = {}) {
@@ -790,63 +800,6 @@ const pillStyle = {
   display: "inline-flex", alignItems: "center", gap: 5, background: "#fff",
   border: `1px solid ${LINE}`, borderRadius: 999, padding: "6px 11px", fontSize: 13.5, fontWeight: 600,
 };
-
-/* ───────────── mode gate: family server vs device-only ─────── */
-
-function ModeGate({ onDone }) {
-  const [url, setUrl] = useState("http://localhost:8787");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [expand, setExpand] = useState(false);
-
-  const connect = async () => {
-    setBusy(true); setErr("");
-    try {
-      const clean = url.trim().replace(/\/+$/, "");
-      const r = await fetch(clean + "/api/health").then(x => x.json());
-      if (!r.ok) throw new Error();
-      try {
-        localStorage.setItem("lingua-server-url", clean);
-        localStorage.setItem("lingua-mode", "server");
-      } catch {}
-      try { serverCaps = await fetch(clean + "/api/config").then(x => x.json()); } catch {}
-      onDone();
-    } catch { setErr("Couldn't reach a Lingua server at that address."); }
-    setBusy(false);
-  };
-
-  return (
-    <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 30 }}>
-        <Orb accent="#0E7C6B" size={44} />
-        <div className="f-display" style={{ fontWeight: 700, fontSize: 24, letterSpacing: -0.5 }}>Lingua</div>
-      </div>
-      <h1 className="f-display" style={{ fontSize: 30, fontWeight: 600, lineHeight: 1.15, marginBottom: 8 }}>How should Lingua run?</h1>
-      <Card onClick={() => setExpand(true)} style={{ marginBottom: 12, borderColor: expand ? "#0E7C6B" : LINE, borderWidth: expand ? 2 : 1 }}>
-        <div className="f-body" style={{ fontWeight: 600, fontSize: 16 }}>🌐 Connect to your family's server</div>
-        <div className="f-body" style={{ fontSize: 13.5, color: FADE, marginTop: 3 }}>
-          Sync across every device · API keys stay on the server · real pronunciation scoring. Run it with <b>cd server && npm start</b>.
-        </div>
-        {expand && (
-          <div className="rise" style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
-            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://api.lingua.family"
-              className="f-body" style={{ ...inputStyle, margin: "0 0 8px" }} aria-label="Server address" />
-            {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13, marginBottom: 8 }}>{err}</p>}
-            <Btn small accent="#0E7C6B" disabled={busy || !url.trim()} onClick={connect}>
-              {busy ? <Loader size={15} className="animate-spin" /> : <>Connect <ArrowRight size={15} /></>}
-            </Btn>
-          </div>
-        )}
-      </Card>
-      <Card onClick={() => { try { localStorage.setItem("lingua-mode", "local"); } catch {} onDone(); }}>
-        <div className="f-body" style={{ fontWeight: 600, fontSize: 16 }}>📱 This device only</div>
-        <div className="f-body" style={{ fontSize: 13.5, color: FADE, marginTop: 3 }}>
-          Everything stays on this device. You'll paste an OpenAI API key on the next screen.
-        </div>
-      </Card>
-    </div>
-  );
-}
 
 /* ───────────────── AI connection setup (standalone app) ─────── */
 
@@ -3703,7 +3656,7 @@ function LinguaApp() {
 /* ───────────────────────────── Root ───────────────────────────── */
 
 export default function Root() {
-  const [mode, setMode] = useState(APP_MODE);
+  const [mode] = useState(APP_MODE);
   const [ready, setReady] = useState(hasAiAccess);
   const wrap = (child) => (
     <div className="f-body" style={{ minHeight: "100vh", background: MIST, color: INK }}>
@@ -3711,7 +3664,6 @@ export default function Root() {
       {child}
     </div>
   );
-  if (!mode) return wrap(<ModeGate onDone={() => setMode(APP_MODE())} />);
   if (mode === "local" && !ready) return wrap(<ApiKeyGate onDone={() => setReady(true)} />);
   return <LinguaApp />;
 }

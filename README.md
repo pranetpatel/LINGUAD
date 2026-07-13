@@ -11,6 +11,30 @@ teacher/classroom mode with assignments.
 Built with React + Vite. AI powered by GPT (OpenAI API). Optional premium voice via
 ElevenLabs and optional in-browser open-source HD voice (Kokoro-82M).
 
+## Architecture
+
+Three separate pieces, each with one job:
+
+- **Vercel** hosts the static frontend only — the compiled HTML/CSS/JS from `npm run build`
+  (the React UI). It has no backend logic, no database connection, and holds no secrets.
+- **The Express server** (`server/`) is the backend. It's the only thing that talks to
+  MongoDB, and the only thing holding API keys (OpenAI, ElevenLabs). It handles
+  signup/login, proxies AI/TTS requests so keys never reach the browser, and runs the
+  WebSocket speech-streaming connection. It needs a host that supports long-running Node
+  processes and WebSockets (e.g. Railway, Fly.io) — not Vercel.
+- **MongoDB** is just the data store. It doesn't run any code; it only stores what the
+  server writes to it — accounts (email, hashed password, name) and household/progress
+  data. The frontend never queries Mongo directly.
+
+**Request flow:** browser → Vercel (serves the page) → the page's JS calls the Express
+server directly → server reads/writes MongoDB and calls OpenAI/ElevenLabs. Vercel and
+MongoDB never talk to each other; the server is the middleman for everything.
+
+In local dev, `vite.config.js` proxies `/api/*` from the Vite dev server to the backend
+on `:8787` so this same flow works without CORS friction. In production, the frontend
+needs `VITE_SERVER_URL` set at build time to the backend's real URL (see `.env.example`),
+since Vercel and the backend are deployed independently and don't share an origin.
+
 ## Quick start
 
 ```bash
