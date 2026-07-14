@@ -1048,7 +1048,7 @@ const Fonts = () => (
     @keyframes pop {0%{transform:scale(.4);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
     @keyframes pulse-ring {0%{box-shadow:0 0 0 0 rgba(217,91,63,.35)}70%{box-shadow:0 0 0 18px rgba(217,91,63,0)}100%{box-shadow:0 0 0 0 rgba(217,91,63,0)}}
     @keyframes confetti-fall {0%{transform:translateY(-6vh) rotate(0deg);opacity:1}100%{transform:translateY(108vh) rotate(340deg);opacity:.85}}
-    .hscroll{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x proximity;padding:4px 2px 12px;margin:0 -18px;padding-left:18px;padding-right:18px;scrollbar-width:none}
+    .hscroll{display:flex;gap:12px;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;padding:4px 0 12px;margin:0;max-width:100%;scrollbar-width:none}
     .hscroll::-webkit-scrollbar{display:none}
     .hscroll>*{scroll-snap-align:start;flex-shrink:0}
     @keyframes shake {0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
@@ -2954,14 +2954,14 @@ const CHANNELS = [
 
 const shuffle = (a) => { const x = [...a]; for (let i = x.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [x[i], x[j]] = [x[j], x[i]]; } return x; };
 
-function CourseView({ member, update, tts, accent, addWords, finish, exit, observeSkill }) {
+function CourseView({ member, update, patch, tts, accent, addWords, finish, exit, observeSkill }) {
   const p = member.profile;
   const t = p.target, n = p.native === "es" ? "es" : "en";
   const kid = member.ageBand === "child";
   const prog = member.path || {};
   const itemM = (u, i) => (prog[u.id]?.[i]) || 0; // mastery stage 0..5: hear → pick → fill → build → say
   const unitDone = (u) => u.items.every((_, i) => itemM(u, i) >= 5);
-  const unitPct = (u) => Math.round(u.items.reduce((a, _, i) => a + Math.min(itemM(u, i), 5), 0) / (u.items.length * 5) * 100);
+  const unitPct = (u) => Math.min(100, Math.round(u.items.reduce((a, _, i) => a + Math.min(itemM(u, i), 5), 0) / (u.items.length * 5) * 100));
   const unlocked = (idx) => idx === 0 || unitDone(PATH_UNITS[idx - 1]);
 
   const [unit, setUnit] = useState(null);
@@ -2980,9 +2980,14 @@ function CourseView({ member, update, tts, accent, addWords, finish, exit, obser
   const [creativeDraft, setCreativeDraft] = useState("");
   const [creativeBusy, setCreativeBusy] = useState(false);
 
+  // Functional patch so concurrent skill/word updates never wipe path progress.
   const setMastery = (u, i, m) => {
-    const next = { ...prog, [u.id]: { ...(prog[u.id] || {}), [i]: m } };
-    update({ ...member, path: next });
+    const apply = (mem) => ({
+      ...mem,
+      path: { ...(mem.path || {}), [u.id]: { ...((mem.path || {})[u.id] || {}), [i]: m } },
+    });
+    if (patch) patch(apply);
+    else update(apply(member));
   };
 
   const openUnit = (u) => {
@@ -3014,9 +3019,8 @@ function CourseView({ member, update, tts, accent, addWords, finish, exit, obser
     setStreak(st => passed ? st + 1 : 0);
     if (passed && kid) setBurst(b => b + 1);
     let q = queue.slice(1);
+    const m2 = passed ? cur.m + 1 : cur.m;
     if (passed) {
-      const m2 = cur.m + 1;
-      setMastery(unit, cur.i, m2);
       if (m2 < 5) q = [...q, cur.i];                 // interleaved: next stage comes back around
     } else {
       setMisses(x => x + 1);
@@ -3025,18 +3029,29 @@ function CourseView({ member, update, tts, accent, addWords, finish, exit, obser
     resetExercise();
     setQueue(q);
     if (!q.length) {
-      let toUpdate = member;
-      if (kid) {
-        const owned = member.stickers || [];
-        const avail = STICKERS.filter(x => !owned.includes(x));
-        if (avail.length) {
-          const pick = avail[Math.floor(Math.random() * avail.length)];
-          setWonSticker(pick);
-          toUpdate = { ...member, stickers: [...owned, pick] };
+      // One atomic write: final mastery (+ optional sticker). A second update(member)
+      // used to overwrite path and leave the last item short of mastery 5 — next unit stayed locked.
+      const apply = (mem) => {
+        let next = {
+          ...mem,
+          path: { ...(mem.path || {}), [unit.id]: { ...((mem.path || {})[unit.id] || {}), [cur.i]: m2 } },
+        };
+        if (kid) {
+          const owned = mem.stickers || [];
+          const avail = STICKERS.filter(x => !owned.includes(x));
+          if (avail.length) {
+            const pick = avail[Math.floor(Math.random() * avail.length)];
+            setWonSticker(pick);
+            next = { ...next, stickers: [...owned, pick] };
+          }
         }
-      }
-      update(toUpdate);
+        return next;
+      };
+      if (patch) patch(apply);
+      else update(apply(member));
       beginCreative();
+    } else if (passed) {
+      setMastery(unit, cur.i, m2);
     }
   };
 
@@ -3083,17 +3098,17 @@ function CourseView({ member, update, tts, accent, addWords, finish, exit, obser
     };
     return (
       <Screen exit={exit} title={kid ? "Course adventure 🗺️" : "Course path"}>
-        <Card style={{ padding: 16, marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "baseline", marginBottom: 8 }}>
-            <div className="f-body" style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: FADE, flex: 1 }}>
+        <Card style={{ padding: 16, marginBottom: 20, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, minWidth: 0 }}>
+            <div className="f-body" style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: FADE, flex: 1, minWidth: 0 }}>
               {kid ? "🗺️ MY QUEST" : "CURRICULUM"}
             </div>
-            <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>
+            <div className="f-body" style={{ fontSize: 12.5, color: FADE, flexShrink: 0, textAlign: "right" }}>
               {unitsDone}/{flat.length} units · {itemsMastered}/{itemsTotal} {kid ? "words won" : "items mastered"}
             </div>
           </div>
           <div style={{ height: 8, borderRadius: 4, background: "#E8EEEB", overflow: "hidden" }} role="progressbar" aria-valuenow={itemsMastered} aria-valuemin={0} aria-valuemax={itemsTotal}>
-            <div style={{ height: 8, borderRadius: 4, width: `${itemsTotal ? (itemsMastered / itemsTotal) * 100 : 0}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
+            <div style={{ height: 8, borderRadius: 4, width: `${itemsTotal ? Math.min(100, (itemsMastered / itemsTotal) * 100) : 0}%`, maxWidth: "100%", background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
           </div>
           {!kid && <p className="f-body" style={{ fontSize: 12.5, color: FADE, margin: "10px 0 0" }}>
             Frequency-first, taught inside real sentences: hear → pick → fill → build → say. Mastery unlocks the next unit.
@@ -3139,8 +3154,8 @@ function CourseView({ member, update, tts, accent, addWords, finish, exit, obser
                       }}>{u.emoji}</div>
                       <div className="f-body" style={{ fontSize: 11, fontWeight: 700, letterSpacing: .6, color: "#9AA8A3" }}>UNIT {idx + 1}</div>
                       <div className="f-body" style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.25, minHeight: 34, margin: "2px 0 8px" }}>{u.title[n]}</div>
-                      <div style={{ height: 5, borderRadius: 3, background: "#E8EEEB" }}>
-                        <div style={{ height: 5, borderRadius: 3, width: `${pct}%`, background: done ? "#0E7C6B" : accent, transition: "width .3s" }} />
+                      <div style={{ height: 5, borderRadius: 3, background: "#E8EEEB", overflow: "hidden" }}>
+                        <div style={{ height: 5, borderRadius: 3, width: `${Math.min(100, Math.max(0, pct))}%`, maxWidth: "100%", background: done ? "#0E7C6B" : accent, transition: "width .3s" }} />
                       </div>
                       <div className="f-body" style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: FADE, marginTop: 5 }}>
                         <span>{u.items.length} {kid ? "words" : "items"}</span><span>{pct}%</span>
@@ -5069,7 +5084,7 @@ function LinguaApp() {
           <ListeningLab member={member} voices={voices} accent={accent} addWords={addWords} observeSkill={observeSkill}
             finish={(xp) => { award(xp, "listen"); setMode(null); setTab("home"); }} exit={() => setMode(null)} />
         ) : mode === "course" ? (
-          <CourseView member={member} update={updateMember} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill}
+          <CourseView member={member} update={updateMember} patch={patchMember} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill}
             finish={(xp) => { award(xp, "lesson"); setMode(null); setTab("home"); }} exit={() => { tts.stop(); setMode(null); }} />
         ) : (
           <>
