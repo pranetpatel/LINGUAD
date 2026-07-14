@@ -1322,10 +1322,16 @@ function AuthFlow({ household, onSignedIn, onCreated, remote, onRemoteAuth }) {
         <Orb accent="#0E7C6B" size={44} active={view === "welcome"} />
         <div className="f-display" style={{ fontWeight: 700, fontSize: 24, letterSpacing: -0.5 }}>Lingua</div>
         {view === "welcome" && (
-          <button onClick={() => { setAccountType("classroom"); setView("signup"); }} className="f-body"
-            style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: FADE, fontSize: 14, fontWeight: 600, padding: 4 }}>
-            I'm a teacher <ArrowUpRight size={14} />
-          </button>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={() => setView("signin")} className="f-body"
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: FADE, fontSize: 14, fontWeight: 600, padding: 4 }}>
+              Login
+            </button>
+            <button onClick={() => { setAccountType("classroom"); setView("signup"); }} className="f-body"
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: FADE, fontSize: 14, fontWeight: 600, padding: 4 }}>
+              I'm a teacher <ArrowUpRight size={14} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -1338,7 +1344,7 @@ function AuthFlow({ household, onSignedIn, onCreated, remote, onRemoteAuth }) {
             Real spoken conversations, lessons written just for you, story time for the kids —
             and progress every parent can see.
           </p>
-          <Btn full accent="#0E7C6B" onClick={() => { setAccountType("family"); setView("signup"); }}>Create your family account <ArrowRight size={16} /></Btn>
+          <Btn full accent="#0E7C6B" onClick={() => { setAccountType("family"); setView("signup"); }}>Join <ArrowRight size={16} /></Btn>
           <div style={{ height: 10 }} />
           <Btn full ghost onClick={() => setView("signin")}>I already have an account</Btn>
           <p className="f-body" style={{ textAlign: "center", fontSize: 12, color: "#9AA8A3", marginTop: 22 }}>lingua.family</p>
@@ -1373,7 +1379,7 @@ function AuthFlow({ household, onSignedIn, onCreated, remote, onRemoteAuth }) {
           {field("Password", pass, setPass, "password", "6+ characters")}
           {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13.5, marginBottom: 12 }}>{err}</p>}
           <Btn full accent="#0E7C6B" disabled={busy} onClick={doSignup}>
-            {busy ? <Loader size={16} className="animate-spin" /> : <>Continue <ArrowRight size={16} /></>}
+            {busy ? <Loader size={16} className="animate-spin" /> : <>Join <ArrowRight size={16} /></>}
           </Btn>
           <button onClick={() => { setErr(""); setView("welcome"); }} className="f-body" style={backLink}>Back</button>
         </div>
@@ -4772,6 +4778,30 @@ function LinguaApp() {
     if (h) setHousehold(streakFix(h));
     setBooted(true);
   })(); }, []);
+
+  // Supabase auth state listener: keep app session in sync when Supabase's
+  // session is restored (e.g. page reload) or when signing in/out elsewhere
+  useEffect(() => {
+    if (!isSupabase()) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session && !signedIn) {
+        try {
+          const r = await srv("/api/household");
+          versionRef.current = r.version;
+          setHousehold(streakFix(r.data));
+          setSignedIn(true);
+          try { localStorage.setItem("lingua-token", session.access_token); } catch {}
+        } catch {}
+      } else if (!session && signedIn) {
+        setSignedIn(false);
+        setHousehold(null);
+        setActiveId(null);
+        setPinOk(false);
+        setRoute("auth");
+      }
+    });
+    return () => subscription?.unsubscribe();
+  }, [signedIn]);
 
   // multi-device sync: pull on focus + every 25s while signed in
   useEffect(() => {
