@@ -65,7 +65,16 @@ async function srv(path, { method = "GET", body } = {}) {
   return { status: res.status, ...data };
 }
 async function srvSupabase(path, method, body) {
-  if (path === "/api/config") return { status: 200, ai: true, tts: true, stt: false, streamingAsr: false };
+  if (path === "/api/config") {
+    // Was hardcoded to {ai:true, tts:true} regardless of whether OPENAI_API_KEY /
+    // ELEVENLABS_API_KEY were actually set in Vercel — so the UI never warned
+    // when they were missing. Hit the real serverless endpoint instead, same as
+    // the self-hosted server's /api/config does.
+    const res = await fetch("/api/config");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { status: res.status, ai: false, tts: false, stt: false, streamingAsr: false };
+    return { status: 200, ...data };
+  }
   if (path === "/api/auth/signup") return { status: 200, ...(await supaSignup(body)) };
   if (path === "/api/auth/login") return { status: 200, ...(await supaLogin(body)) };
   if (path === "/api/household" && method === "GET") return { status: 200, ...(await supaGetHousehold()) };
@@ -509,7 +518,10 @@ async function askAI(messages, { system, json = false, maxTokens = 1000 } = {}) 
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + SRV_TOKEN() },
       body: JSON.stringify({ messages: msgs, maxTokens }),
     });
-    if (!res.ok) throw new Error(`API ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `API ${res.status}`);
+    }
     data = await res.json();
   } else {
     const key = getApiKey();
@@ -1770,6 +1782,7 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
   const [muted, setMuted] = useState(false);
   const [convoOn, setConvoOn] = useState(false);
   const [micErr, setMicErr] = useState(false);
+  const [aiErr, setAiErr] = useState(null);
   const [debrief, setDebrief] = useState(null);
   const [debriefing, setDebriefing] = useState(false);
 
@@ -1799,7 +1812,16 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
     setMsgs(m); setTyped(""); setBusy(true); busyRef.current = true;
     if (typeof conf === "number") observeSkill("speaking", Math.max(0.2, Math.min(1, 0.35 + conf * 0.65)));
     let reply = "…sorry, say that again?";
-    try { reply = await askAI(m.map(({ role, content }) => ({ role, content })), { system: sysFor(scenario), maxTokens: 220 }); } catch {}
+    try {
+      reply = await askAI(m.map(({ role, content }) => ({ role, content })), { system: sysFor(scenario), maxTokens: 220 });
+      setAiErr(null);
+    } catch (e) {
+      // Was a bare `catch {}` — any failure (missing OPENAI_API_KEY, 503, network,
+      // etc.) silently fell back to the same generic line, so testers only ever
+      // saw "sorry, say that again?" and it looked like a mic/understanding
+      // problem instead of a broken backend. Surface the real reason now.
+      setAiErr(e?.message || "AI request failed");
+    }
     setMsgs([...m, { role: "assistant", content: reply }]);
     setBusy(false); busyRef.current = false;
     if (!mutedRef.current) tts.say(reply, { onEnd: () => setTimeout(resumeListen, 150) });
@@ -1879,7 +1901,12 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
   const start = async (sc) => {
     setScenario(sc); setBusy(true); busyRef.current = true; setDebrief(null); setMsgs([]); setMicErr(false);
     let opener = kid ? "Hi! Ready to play?" : "Hi! Ready when you are.";
-    try { opener = await askAI("Open with one short, inviting spoken line.", { system: sysFor(sc), maxTokens: 120 }); } catch {}
+    try {
+      opener = await askAI("Open with one short, inviting spoken line.", { system: sysFor(sc), maxTokens: 120 });
+      setAiErr(null);
+    } catch (e) {
+      setAiErr(e?.message || "AI request failed");
+    }
     setMsgs([{ role: "assistant", content: opener }]);
     setBusy(false); busyRef.current = false;
     const autoMic = stt.supported && micState === "granted";
@@ -2039,6 +2066,7 @@ Max ${kid ? 1 : 3} corrections (empty array if none), max ${kid ? 2 : 3} newWord
           </div>
         )}
         {micErr && <div className="f-body" style={{ fontSize: 12.5, color: "#A0453A", marginTop: 8 }}>Microphone access was blocked — you can type below, and {tut.name} will still talk.</div>}
+        {aiErr && <div className="f-body" style={{ fontSize: 12.5, color: "#A0453A", marginTop: 8 }}>AI backend error: {aiErr} — check that OPENAI_API_KEY is set on the server.</div>}
       </div>
 
       {/* controls */}
