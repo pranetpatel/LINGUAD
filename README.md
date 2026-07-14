@@ -9,7 +9,8 @@ review, self-updating skill assessments, family accounts with parent PIN control
 teacher/classroom mode with assignments.
 
 Built with React + Vite. AI powered by GPT (OpenAI API). Optional premium voice via
-ElevenLabs and optional in-browser open-source HD voice (Kokoro-82M).
+OpenAI's `gpt-4o-mini-tts` (same key as chat) and optional in-browser open-source HD
+voice (Kokoro-82M).
 
 ## Architecture
 
@@ -18,17 +19,19 @@ Three separate pieces, each with one job:
 - **Vercel** hosts the static frontend only — the compiled HTML/CSS/JS from `npm run build`
   (the React UI). It has no backend logic, no database connection, and holds no secrets.
 - **The Express server** (`server/`) is the backend. It's the only thing that talks to
-  MongoDB, and the only thing holding API keys (OpenAI, ElevenLabs). It handles
-  signup/login, proxies AI/TTS requests so keys never reach the browser, and runs the
-  WebSocket speech-streaming connection. It needs a host that supports long-running Node
-  processes and WebSockets (e.g. Railway, Fly.io) — not Vercel.
+  MongoDB, and the only thing holding API keys (OpenAI, and optionally ElevenLabs for
+  acoustic pronunciation scoring). It handles signup/login, proxies AI/TTS requests so
+  keys never reach the browser, and runs the WebSocket speech-streaming connection. It
+  needs a host that supports long-running Node processes and WebSockets (e.g. Railway,
+  Fly.io) — not Vercel.
 - **MongoDB** is just the data store. It doesn't run any code; it only stores what the
   server writes to it — accounts (email, hashed password, name) and household/progress
   data. The frontend never queries Mongo directly.
 
 **Request flow:** browser → Vercel (serves the page) → the page's JS calls the Express
-server directly → server reads/writes MongoDB and calls OpenAI/ElevenLabs. Vercel and
-MongoDB never talk to each other; the server is the middleman for everything.
+server directly → server reads/writes MongoDB and calls OpenAI (and, if configured,
+ElevenLabs for STT scoring). Vercel and MongoDB never talk to each other; the server
+is the middleman for everything.
 
 In local dev, `vite.config.js` proxies `/api/*` from the Vite dev server to the backend
 on `:8787` so this same flow works without CORS friction. In production, the frontend
@@ -85,9 +88,10 @@ It launches full-screen with the Lingua icon; reviews, decks, and progress work 
 - **Speech input** (talking to the tutor) uses the Web Speech API — best in **Chrome/Edge**.
   Safari/Firefox fall back to typing while the tutor still speaks aloud.
 - **Speech output** ladder, best-available first:
-  1. **ElevenLabs premium** (optional): paste your ElevenLabs API key in any adult profile →
-     Tutor & Voice → Premium voice. Uses `eleven_multilingual_v2` — human-quality, native
-     Spanish + English. Billed to your ElevenLabs account.
+  1. **OpenAI premium** (automatic once you've added an OpenAI key, e.g. via setup or the
+     server's `OPENAI_API_KEY`): uses `gpt-4o-mini-tts` — human-quality, native Spanish +
+     English, with steerable pronunciation instructions per target language. No separate
+     voice key needed; it's the same key already used for the AI tutor.
   2. **Kokoro-82M HD** (optional, open source, English): toggle in Tutor & Voice; downloads
      an ~80 MB model once and synthesizes locally in your browser.
   3. **Enhanced browser voices** (default): expressive prosody engine with per-segment
@@ -101,7 +105,7 @@ The `server/` folder is a self-hostable backend implementing the blueprint's pro
 
 ```bash
 cd server
-cp .env.example .env        # add OPENAI_API_KEY (and optionally ELEVENLABS_API_KEY)
+cp .env.example .env        # add OPENAI_API_KEY (required; also powers premium TTS) and optionally ELEVENLABS_API_KEY (acoustic STT scoring)
 npm install
 npm start                   # → http://localhost:8787
 npm test                    # speech-pipeline unit tests
@@ -114,9 +118,10 @@ What server mode gives you:
   versioned household document. Every change pushes with its base version; the server accepts
   or returns `409` with the newer copy, and clients pull on focus + every 25 s. Sign in on a
   phone and a laptop and watch a lesson finished on one appear on the other.
-- **Server-held keys** — the OpenAI and ElevenLabs keys live only in the server's `.env`.
-  Clients call `/api/ai` and `/api/tts` proxies with their bearer token; no key ever reaches
-  a browser, per the blueprint's security model.
+- **Server-held keys** — the OpenAI key (chat + premium TTS) and the optional ElevenLabs
+  key (acoustic STT scoring) live only in the server's `.env`. Clients call `/api/ai` and
+  `/api/tts` proxies with their bearer token; no key ever reaches a browser, per the
+  blueprint's security model.
 - **The speech-scoring pipeline** (`/api/speech/score`) — normalize → similarity-weighted word
   alignment → grapheme-to-phoneme (rule-based Spanish, heuristic English) → per-word scores
   blending edit similarity with ASR word confidence → phoneme-level diffs → targeted advice.

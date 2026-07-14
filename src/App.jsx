@@ -38,6 +38,14 @@ const getApiKey = () => {
       : (localStorage.getItem("lingua-anthropic-key") || "");
   } catch { return ""; }
 };
+// Premium TTS always calls OpenAI directly, regardless of which provider is
+// chosen for chat — so it needs the OpenAI key specifically, not getApiKey()
+// (which returns an Anthropic key when that's the chosen chat provider, and
+// would otherwise get sent as a Bearer token to OpenAI's TTS endpoint and
+// 401 silently).
+const getOpenAiTtsKey = () => {
+  try { return localStorage.getItem("lingua-openai-key") || ""; } catch { return ""; }
+};
 const hasAiAccess = () => { try { return !!(getApiKey() || localStorage.getItem("lingua-skip-key")); } catch { return true; } };
 
 // ── Lingua server mode: multi-device sync + server-held keys ──
@@ -77,10 +85,10 @@ async function srv(path, { method = "GET", body } = {}) {
 }
 async function srvSupabase(path, method, body) {
   if (path === "/api/config") {
-    // Was hardcoded to {ai:true, tts:true} regardless of whether OPENAI_API_KEY /
-    // ELEVENLABS_API_KEY were actually set in Vercel — so the UI never warned
-    // when they were missing. Hit the real serverless endpoint instead, same as
-    // the self-hosted server's /api/config does.
+    // Was hardcoded to {ai:true, tts:true} regardless of whether OPENAI_API_KEY
+    // was actually set in Vercel — so the UI never warned when it was missing.
+    // Hit the real serverless endpoint instead, same as the self-hosted
+    // server's /api/config does. (TTS runs on OpenAI too now, same key as AI.)
     const res = await fetch("/api/config");
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { status: res.status, ai: false, tts: false, stt: false, streamingAsr: false };
@@ -496,17 +504,17 @@ function voiceShape(member) {
     : null;
   return {
     gender: kv ? kv.gender : persona.gender,
-    voiceKey: kv ? kv.key : persona.gender,          // ElevenLabs voice selector
+    voiceKey: kv ? kv.key : persona.gender,          // premium TTS voice selector (f/m/kid_f/kid_m)
     pitch: (kv ? kv.pitch : persona.voice.pitch || 1) * style.pitch,
     rate: (kv ? kv.rate : persona.voice.rate || 1) * style.rate,
     styleRate: style.rate,
   };
 }
 
-/** Expressive TTS. Engine ladder: ElevenLabs premium (if key) → Kokoro HD
-    (if enabled, EN) → browser voices with prosody AND per-segment language
-    switching, so Spanish text always gets a Spanish voice. */
-function useTTS(member, voices, elevenKey) {
+/** Expressive TTS. Engine ladder: OpenAI premium (gpt-4o-mini-tts, if key) →
+    Kokoro HD (if enabled, EN) → browser voices with prosody AND per-segment
+    language switching, so Spanish text always gets a Spanish voice. */
+function useTTS(member, voices) {
   const [speaking, setSpeaking] = useState(false);
   const enabledRef = useRef(true);
   const sayIdRef = useRef(0);
@@ -580,29 +588,30 @@ function useTTS(member, voices, elevenKey) {
         } catch { if (myId === sayIdRef.current) speakSegments(); }
       };
 
+      const localKey = getOpenAiTtsKey(); // premium TTS always calls OpenAI, so it needs the OpenAI key specifically, not whichever chat provider's key getApiKey() would return
       const premiumOn = isServer()
         ? (serverCaps.tts && member.premiumVoice !== false)
-        : (elevenKey && elevenKey !== elevenBlockedKey && member.premiumVoice !== false);
+        : (localKey && localKey !== ttsBlockedKey && member.premiumVoice !== false);
       if (premiumOn) {
         (async () => {
           try {
             setSpeaking(true);
             let blob;
             if (isSupabase()) {
-              blob = await supaTts(clean, shape.voiceKey);
+              blob = await supaTts(clean, shape.voiceKey, member.profile.target);
             } else if (isServer()) {
               const r = await fetch(SRV_URL() + "/api/tts", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: "Bearer " + SRV_TOKEN() },
-                body: JSON.stringify({ text: clean, gender: shape.voiceKey }),
+                body: JSON.stringify({ text: clean, gender: shape.voiceKey, lang: member.profile.target }),
               });
               if (!r.ok) throw new Error(String(r.status));
               blob = await r.blob();
-            } else blob = await elevenSpeak(clean, shape.voiceKey, elevenKey);
+            } else blob = await openaiSpeakDirect(clean, shape.voiceKey, member.profile.target, localKey);
             if (myId !== sayIdRef.current) return;
             await playBlob(blob, speed * shape.styleRate); // neural voices: style affects pacing
           } catch (e) {
-            if (e?.message === "401" || e?.message === "403") elevenBlockedKey = elevenKey;
+            if (e?.message === "401" || e?.message === "403") ttsBlockedKey = localKey;
             if (myId !== sayIdRef.current) return;
             if (member.hdVoice && kokoroEngine && member.profile.target === "en") tryKokoro();
             else speakSegments();
@@ -614,7 +623,7 @@ function useTTS(member, voices, elevenKey) {
       if (member.hdVoice && kokoroEngine && member.profile.target === "en") { tryKokoro(); return; }
       speakSegments();
     } catch { setSpeaking(false); onEnd && onEnd(); }
-  }, [member, voices, elevenKey, stop]);
+  }, [member, voices, stop]);
 
   const setEnabled = (on) => { enabledRef.current = on; if (!on) stop(); };
   return { speaking, say, stop, setEnabled };
@@ -921,22 +930,28 @@ function loadKokoro() {
 }
 const KOKORO_VOICES = { f: "af_heart", m: "am_michael" };
 
-/* ── Premium voice: ElevenLabs (bring-your-own-key) ──
-   eleven_multilingual_v2 speaks Spanish and English natively with real
-   expression — the closest thing to a human tutor available today. */
-const ELEVEN_VOICE = {
-  f: "21m00Tcm4TlvDq8ikWAM" /* Rachel */, m: "pNInz6obpgDQGcFmaJgB" /* Adam */,
-  kid_f: "MF3mGyEYCl7XYWbV9V6O" /* Elli — young female */, kid_m: "TxGEqnHWrfWFTfGW9XjX" /* Josh — young male */,
+/* ── Premium voice: OpenAI TTS (gpt-4o-mini-tts) ──
+   Used for the self-hosted/Supabase server proxy (api/tts.js) AND, in local
+   "no backend" mode, called directly from the browser with the same OpenAI
+   key already used for chat (getApiKey()) — no separate voice key needed. */
+const OPENAI_TTS_VOICE = {
+  f: "nova", m: "onyx", kid_f: "shimmer", kid_m: "fable",
 };
-let elevenBlockedKey = null; // a key that failed auth/network — skip until changed
-async function elevenSpeak(text, gender, key) {
-  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE[gender] || ELEVEN_VOICE.f}`, {
+const OPENAI_TTS_ACCENT = {
+  es: "Speak in natural, native Spanish (neutral Latin American accent). Use authentic Spanish pronunciation — for example, pronounce the letter J as the Spanish H sound, not an English J. Warm, clear, conversational pace, like a friendly tutor.",
+  en: "Speak naturally in English, warm and conversational pace, like a friendly tutor.",
+};
+let ttsBlockedKey = null; // a personal key that failed auth/network — skip until changed
+async function openaiSpeakDirect(text, gender, lang, key) {
+  const res = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
-    headers: { "xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      text,
-      model_id: "eleven_multilingual_v2",
-      voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.3, use_speaker_boost: true },
+      model: "gpt-4o-mini-tts",
+      voice: OPENAI_TTS_VOICE[gender] || OPENAI_TTS_VOICE.f,
+      input: String(text).slice(0, 900),
+      instructions: OPENAI_TTS_ACCENT[lang] || OPENAI_TTS_ACCENT.en,
+      response_format: "mp3",
     }),
   });
   if (!res.ok) throw new Error(String(res.status));
@@ -3853,13 +3868,12 @@ function AssessmentCard({ member, kidLabels = false }) {
   );
 }
 
-function ProfileView({ member, household, accent, tts, voices, update, reset, switchMember, signOut, upgrade, pin, saveElevenKey }) {
+function ProfileView({ member, household, accent, tts, voices, update, reset, switchMember, signOut, upgrade, pin }) {
   const kid = member.ageBand === "child";
   const individual = household.type === "individual";
   const p = member.profile, s = member.stats;
   const stars = Math.floor(s.xp / 10);
   const [confirmLang, setConfirmLang] = useState(null);
-  const [keyDraft, setKeyDraft] = useState("");
   const [hdStatus, setHdStatus] = useState(kokoroEngine ? "ready" : member.hdVoice ? "loading" : null);
   useEffect(() => { // resume a pending HD load if the toggle was already on
     if (member.hdVoice && !kokoroEngine) {
@@ -3984,7 +3998,7 @@ function ProfileView({ member, household, accent, tts, voices, update, reset, sw
             <div className="f-body" style={{ fontSize: 13, fontWeight: 600 }}>Premium voice <span style={{ fontSize: 11, color: FADE, fontWeight: 500 }}>· provided by your server{serverCaps.tts ? "" : " (not configured)"}</span></div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
               <div className="f-body" style={{ fontSize: 12, color: FADE, flex: 1 }}>
-                {serverCaps.tts ? "Human-quality ElevenLabs voice, key held server-side." : "Ask the server admin to set ELEVENLABS_API_KEY to enable it."}
+                {serverCaps.tts ? "Human-quality OpenAI voice, key held server-side." : "Ask the server admin to set OPENAI_API_KEY to enable it."}
               </div>
               {serverCaps.tts && (
                 <button role="switch" aria-checked={member.premiumVoice !== false} aria-label="Premium voice"
@@ -3998,23 +4012,17 @@ function ProfileView({ member, household, accent, tts, voices, update, reset, sw
         )}
         {!kid && !isServer() && (
           <div style={{ borderTop: `1px solid ${MIST}`, marginTop: 12, paddingTop: 12 }}>
-            <div className="f-body" style={{ fontSize: 13, fontWeight: 600 }}>Premium voice <span style={{ fontSize: 11, color: FADE, fontWeight: 500 }}>· ElevenLabs · best quality · speaks Spanish & English natively</span></div>
-            {!household.elevenKey ? (
-              <>
-                <p className="f-body" style={{ fontSize: 12, color: FADE, margin: "4px 0 8px", lineHeight: 1.5 }}>
-                  Paste your own ElevenLabs API key (elevenlabs.io → Profile → API keys). It's stored only on this device and used directly from your browser.
-                </p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input type="password" value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="xi-api-key…"
-                    className="f-body" style={{ ...inputStyle, margin: 0, flex: 1 }} aria-label="ElevenLabs API key" />
-                  <Btn small accent={accent} disabled={keyDraft.trim().length < 10}
-                    onClick={() => { saveElevenKey(keyDraft.trim()); setKeyDraft(""); }}>Save</Btn>
-                </div>
-              </>
+            <div className="f-body" style={{ fontSize: 13, fontWeight: 600 }}>Premium voice <span style={{ fontSize: 11, color: FADE, fontWeight: 500 }}>· OpenAI · speaks Spanish & English natively</span></div>
+            {!getOpenAiTtsKey() ? (
+              <p className="f-body" style={{ fontSize: 12, color: FADE, margin: "4px 0 8px", lineHeight: 1.5 }}>
+                {AI_PROVIDER() === "openai"
+                  ? "Add your OpenAI API key in setup to unlock this — it's the same key used for the AI tutor, no separate key needed."
+                  : "Premium voice always uses OpenAI, even with Claude as your AI tutor. Add an OpenAI API key in setup to unlock it."}
+              </p>
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
                 <div className="f-body" style={{ fontSize: 12, color: FADE, flex: 1 }}>
-                  Key saved ✔ — {member.premiumVoice !== false ? `${tutorFor(member).name} speaks with a human ElevenLabs voice.` : "premium voice is off for this profile."}
+                  {member.premiumVoice !== false ? `${tutorFor(member).name} speaks with a human OpenAI voice.` : "premium voice is off for this profile."}
                   {" "}If a reply falls back to the browser voice, the key or network was rejected.
                 </div>
                 <button role="switch" aria-checked={member.premiumVoice !== false} aria-label="Premium voice"
@@ -4023,9 +4031,6 @@ function ProfileView({ member, household, accent, tts, voices, update, reset, sw
                   <span style={{ position: "absolute", top: 3, left: member.premiumVoice !== false ? 21 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />
                 </button>
               </div>
-            )}
-            {household.elevenKey && member.isParent && (
-              <button onClick={() => saveElevenKey(null)} className="f-body" style={{ background: "none", border: "none", color: "#A0453A", fontSize: 12, cursor: "pointer", padding: 0, marginTop: 6 }}>Remove key</button>
             )}
           </div>
         )}
@@ -4699,7 +4704,7 @@ function LinguaApp() {
   };
   const member = household?.members.find(m => m.id === activeId) || null;
   const accent = member ? LANGS[member.profile.target].accent : "#0E7C6B";
-  const tts = useTTS(member || { personality: "warm", profile: { target: "en" } }, voices, household?.elevenKey);
+  const tts = useTTS(member || { personality: "warm", profile: { target: "en" } }, voices);
 
   const updateMember = (next) => {
     persist({ ...household, members: household.members.map(m => (m.id === next.id ? next : m)) });
@@ -5007,7 +5012,6 @@ function LinguaApp() {
               <ProfileView member={member} household={household} accent={accent} tts={tts} voices={voices}
                 update={updateMember}
                 pin={{ has: !!household.pinHash, set: startSetPin, change: startChangePin, remove: startRemovePin }}
-                saveElevenKey={(k) => persist({ ...household, elevenKey: k })}
                 upgrade={() => { persist({ ...household, type: "family" }); setRoute("add-choice"); }}
                 switchMember={() => { tts.stop(); setPinOk(false); setRoute("picker"); }}
                 signOut={() => { tts.stop(); if (isSupabase()) supaLogout(); try { localStorage.removeItem("lingua-token"); } catch {} setSignedIn(false); setActiveId(null); setPinOk(false); setRoute("auth"); }}
@@ -5087,3 +5091,4 @@ export default function Root() {
   if (mode === "local" && !ready) return wrap(<ApiKeyGate onDone={() => setReady(true)} />);
   return <LinguaApp />;
 }
+ 

@@ -3,7 +3,7 @@
 import http from "node:http";
 import express from "express";
 import cors from "cors";
-import { PORT, ANTHROPIC_KEY, ELEVEN_KEY, ORIGINS } from "./env.js";
+import { PORT, ANTHROPIC_KEY, OPENAI_KEY, ELEVEN_KEY, ORIGINS } from "./env.js";
 import { accounts, households } from "./store.js";
 import { signup, login, requireAuth } from "./auth.js";
 import { transcribe } from "./speech/providers.js";
@@ -27,7 +27,7 @@ const scoreLimit = makeLimiter({ windowMs: 60000, max: 30,  name: "score" });
 const syncLimit  = makeLimiter({ windowMs: 60000, max: 120, name: "sync"  });
 
 app.get("/api/health", (_, res) => ok(res, { ok: true, service: "lingua" }));
-app.get("/api/config", (_, res) => ok(res, { ai: !!pickProvider(), aiProvider: pickProvider(), tts: !!ELEVEN_KEY, stt: !!ELEVEN_KEY, streamingAsr: streamingAvailable() }));
+app.get("/api/config", (_, res) => ok(res, { ai: !!pickProvider(), aiProvider: pickProvider(), tts: !!OPENAI_KEY, stt: !!ELEVEN_KEY, streamingAsr: streamingAvailable() }));
 
 /* ── auth ── */
 app.post("/api/auth/signup", authLimit.mw(byIp), async (req, res) => { try { ok(res, await signup(req.body || {})); } catch (e) { fail(res, e); } });
@@ -65,26 +65,39 @@ app.post("/api/ai", requireAuth, aiLimit.mw(byAccount), async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-/* ── server-held voice key: ElevenLabs TTS proxy ── */
-const ELEVEN_VOICE = {
-  f: "21m00Tcm4TlvDq8ikWAM" /* Rachel */, m: "pNInz6obpgDQGcFmaJgB" /* Adam */,
-  kid_f: "MF3mGyEYCl7XYWbV9V6O" /* Elli — young female */, kid_m: "TxGEqnHWrfWFTfGW9XjX" /* Josh — young male */,
+/* ── server-held voice key: OpenAI TTS proxy (gpt-4o-mini-tts) ──
+   Replaces the old ElevenLabs-based TTS proxy — same contract (POST
+   {text, gender, lang} -> audio/mpeg), but uses OPENAI_API_KEY (already
+   required for chat) instead of a separate ELEVENLABS_API_KEY. Note
+   ELEVEN_KEY is still used below for acoustic speech-to-text scoring —
+   that's a separate capability this swap doesn't touch. */
+const OPENAI_VOICE = {
+  f: "nova", m: "onyx", kid_f: "shimmer", kid_m: "fable",
+};
+const ACCENT_INSTRUCTIONS = {
+  es: "Speak in natural, native Spanish (neutral Latin American accent). Use authentic Spanish pronunciation — for example, pronounce the letter J as the Spanish H sound, not an English J. Warm, clear, conversational pace, like a friendly tutor.",
+  en: "Speak naturally in English, warm and conversational pace, like a friendly tutor.",
 };
 app.post("/api/tts", requireAuth, ttsLimit.mw(byAccount), async (req, res) => {
   try {
-    if (!ELEVEN_KEY) return fail(res, { status: 503, message: "Server has no ELEVENLABS_API_KEY configured" });
-    const { text, gender } = req.body || {};
+    if (!OPENAI_KEY) return fail(res, { status: 503, message: "Server has no OPENAI_API_KEY configured" });
+    const { text, gender, lang } = req.body || {};
     if (!text) return fail(res, { status: 400, message: "text required" });
-    const upstream = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE[gender] || ELEVEN_VOICE.f}`, {
+    const upstream = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
-      headers: { "xi-api-key": ELEVEN_KEY, "Content-Type": "application/json", Accept: "audio/mpeg" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
       body: JSON.stringify({
-        text: String(text).slice(0, 900),
-        model_id: "eleven_multilingual_v2",
-        voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.3, use_speaker_boost: true },
+        model: "gpt-4o-mini-tts",
+        voice: OPENAI_VOICE[gender] || OPENAI_VOICE.f,
+        input: String(text).slice(0, 900),
+        instructions: ACCENT_INSTRUCTIONS[lang] || ACCENT_INSTRUCTIONS.en,
+        response_format: "mp3",
       }),
     });
-    if (!upstream.ok) return fail(res, { status: upstream.status, message: "TTS upstream error" });
+    if (!upstream.ok) {
+      const errBody = await upstream.text().catch(() => "");
+      return fail(res, { status: upstream.status, message: errBody || "TTS upstream error" });
+    }
     res.type("audio/mpeg");
     res.send(Buffer.from(await upstream.arrayBuffer()));
   } catch (e) { fail(res, e); }
@@ -103,4 +116,4 @@ app.post("/api/speech/score", requireAuth, scoreLimit.mw(byAccount), async (req,
 
 const server = http.createServer(app);
 attachAsr(server); // WebSocket streaming-ASR gateway on the same port
-server.listen(PORT, () => console.log(`Lingua server on :${PORT}  ai=${!!ANTHROPIC_KEY || !!process.env.OPENAI_API_KEY} tts/stt=${!!ELEVEN_KEY} streamingAsr=${streamingAvailable()}`));
+server.listen(PORT, () => console.log(`Lingua server on :${PORT}  ai=${!!ANTHROPIC_KEY || !!OPENAI_KEY} tts=${!!OPENAI_KEY} stt=${!!ELEVEN_KEY} streamingAsr=${streamingAvailable()}`));

@@ -3,7 +3,10 @@
    - "browser": trusts the client's Web Speech transcript + confidence
    - "elevenlabs": real acoustic STT (scribe_v1) with word-level confidence,
      used automatically when the server holds an ELEVENLABS_API_KEY and the
-     client sends audio. Add Whisper/GCP here the same way. */
+     client sends audio. Add Whisper/GCP here the same way.
+   Note: this is unrelated to TTS (which now runs on OpenAI, see
+   server/index.js's /api/tts) — ElevenLabs' role here is speech-to-text
+   scoring only. */
 import { ELEVEN_KEY } from "../env.js";
 
 export async function transcribe({ audioB64, mime, lang, transcript, confidence }) {

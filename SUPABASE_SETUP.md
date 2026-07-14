@@ -2,10 +2,10 @@
 
 This is the alternative to `server/` + MongoDB described in the architecture memo:
 Supabase Auth + Postgres replace the account/household backend, Vercel serverless
-functions (`api/ai.js`, `api/tts.js`) proxy OpenAI/ElevenLabs so keys stay off the
-client, and speech-to-text runs in the browser (Web Speech API) instead of a
-server-side ASR gateway. `server/` is untouched — this is a parallel mode,
-switched with one env var.
+functions (`api/ai.js`, `api/tts.js`) proxy OpenAI (chat and premium TTS, via
+gpt-4o-mini-tts) so keys stay off the client, and speech-to-text runs in the
+browser (Web Speech API) instead of a server-side ASR gateway. `server/` is
+untouched — this is a parallel mode, switched with one env var.
 
 ## 1. Create the Supabase project (2 minutes)
 
@@ -43,20 +43,21 @@ signup doesn't hit an RLS error while waiting for email confirmation.
 
 ## 4. Configure the AI/TTS proxy (Vercel functions)
 
-`api/ai.js` and `api/tts.js` hold the OpenAI/ElevenLabs keys server-side, same as
+`api/ai.js` and `api/tts.js` hold the OpenAI key server-side, same as
 `server/index.js`'s `/api/ai` and `/api/tts` today — they just run as Vercel
-serverless functions instead of Supabase Edge Functions, so the keys live next to
-the rest of the app's Vercel env config.
+serverless functions instead of Supabase Edge Functions, so the key lives next to
+the rest of the app's Vercel env config. `api/tts.js` uses OpenAI's
+`gpt-4o-mini-tts` for premium voices — the same `OPENAI_API_KEY` already
+required for chat, no separate TTS key needed.
 
 In the Vercel project → **Settings → Environment Variables**, add:
 
 ```
 OPENAI_API_KEY=sk-...
-ELEVENLABS_API_KEY=...       # optional, premium voices
 ```
 
-No Supabase CLI or `supabase secrets` needed — these are plain Vercel env vars,
-never sent to the browser (only `api/*.js`, which runs server-side, reads them).
+No Supabase CLI or `supabase secrets` needed — this is a plain Vercel env var,
+never sent to the browser (only `api/*.js`, which runs server-side, reads it).
 
 ## 5. Point the app at it
 

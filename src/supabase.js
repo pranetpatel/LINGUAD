@@ -272,8 +272,8 @@ export async function supaAskAI(messages, maxTokens) {
   return data;
 }
 
-export async function supaTts(text, gender) {
-  const res = await authedFetch("tts", { text, gender });
+export async function supaTts(text, gender, lang) {
+  const res = await authedFetch("tts", { text, gender, lang });
   if (!res.ok) throw new Error(String(res.status));
   return await res.blob();
 }

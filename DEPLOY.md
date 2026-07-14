@@ -14,7 +14,7 @@ The client is a fully static build (`dist/`) served from any CDN or static host.
 single Node process (Express + a WebSocket upgrade handler on the same port) that holds all API
 keys, owns the account database, and exposes: `/api/health`, `/api/config`, `/api/auth/*`,
 `/api/household` (GET/PUT/DELETE, versioned sync), `/api/ai` (OpenAI proxy), `/api/tts`
-(ElevenLabs proxy), `/api/speech/score` (scoring pipeline), and `ws(s)://…/api/asr/stream`
+(OpenAI TTS proxy), `/api/speech/score` (scoring pipeline), and `ws(s)://…/api/asr/stream`
 (streaming ASR gateway). Clients authenticate with bearer tokens; browsers never see a provider
 key. The client also runs in a device-only mode with a user-supplied OpenAI key, which needs
 no backend at all, if that's all you want, do step 3 only and stop.
@@ -29,10 +29,11 @@ cd lingua-web
 Node 20+ locally and on the server host (the backend uses top-level `await` and the global
 `fetch`/`FormData`, so Node 18 is the hard floor; 20 or 22 recommended). The **lingua.family**
 domain registered and pointed at a DNS provider you control. An **OpenAI API key**
-(platform.openai.com), required for all AI features. Optional: an **ElevenLabs API key**
-(premium tutor voices + acoustic pronunciation scoring), a **Deepgram API key** (live streaming
-transcription in conversations), and a **MongoDB database** (production persistence; without it
-the server uses an atomic JSON file, which is fine for a family and wrong for a business).
+(platform.openai.com), required for all AI features, including premium tutor voices
+(gpt-4o-mini-tts). Optional: an **ElevenLabs API key** (acoustic pronunciation scoring only),
+a **Deepgram API key** (live streaming transcription in conversations), and a **MongoDB
+database** (production persistence; without it the server uses an atomic JSON file, which is
+fine for a family and wrong for a business).
 
 ## 1. Deploy the backend to api.lingua.family
 
@@ -69,8 +70,8 @@ Copy `server/.env.example` to `server/.env` (or set these in your platform's das
 
 ```bash
 PORT=8787
-OPENAI_API_KEY=sk-...                   # required, lessons, talk, stories, digests
-ELEVENLABS_API_KEY=...                  # optional, premium voices + acoustic STT scoring
+OPENAI_API_KEY=sk-...                   # required, lessons, talk, stories, digests, premium TTS voices
+ELEVENLABS_API_KEY=...                  # optional, acoustic STT scoring only (TTS now uses OpenAI)
 DEEPGRAM_API_KEY=...                    # optional, live streaming transcription (nova-2)
 DATABASE_URL=postgres://user:pass@host:5432/lingua      # optional, Postgres instead of JSON file
 MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/lingua   # optional, MongoDB instead of JSON file
@@ -159,10 +160,11 @@ holds one upstream Deepgram socket per active speaker, a Pi handles a family, a 
 a school.
 
 **Costs to expect.** OpenAI usage scales with lessons/conversations generated (each turn is a
-small gpt-4o call, capped at 1,600 output tokens server-side). ElevenLabs bills per character
-spoken by tutors; the server truncates TTS requests at 900 characters. Deepgram bills per audio
-minute streamed, with a 15-second cap per utterance and a 30-second hard session cap in the
-gateway.
+small gpt-4o call, capped at 1,600 output tokens server-side) and with premium TTS (gpt-4o-mini-tts
+bills per character spoken by tutors; the server truncates TTS requests at 900 characters).
+ElevenLabs, if configured, only bills for acoustic pronunciation scoring audio. Deepgram bills
+per audio minute streamed, with a 15-second cap per utterance and a 30-second hard session cap
+in the gateway.
 
 ## 6. Troubleshooting
 
@@ -171,7 +173,7 @@ gateway.
 never appears*, the site isn't HTTPS, or the browser previously stored a Block (the in-app
 denied sheet walks users through the address-bar fix). *Streaming badge never says "live server
 transcription"*, `/api/config` shows `"streamingAsr":false` (no Deepgram key), or your reverse
-proxy is dropping WebSocket upgrades. *Premium voice silently falls back to the browser voice*, the ElevenLabs key is invalid or out of quota; the client is designed to degrade audibly rather
+proxy is dropping WebSocket upgrades. *Premium voice silently falls back to the browser voice*, the OpenAI key is invalid or out of quota; the client is designed to degrade audibly rather
 than fail. *A 429 during normal family use*, you're behind a shared NAT hitting the per-IP auth
 limit; raise `max` for the `auth` limiter in `server/index.js`.
 
