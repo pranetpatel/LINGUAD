@@ -123,6 +123,21 @@ Supabase's default mailer is rate-limited and meant for development/demos — fo
 real invite volume, configure a custom SMTP provider under **Authentication →
 Emails** in the dashboard (not an app code change).
 
+### Configuring the contact email
+
+The contact email used in invite templates and throughout the app is configurable
+via the `CONTACT_EMAIL` environment variable (defaults to `hello@lingua.family`).
+Set this in Vercel's environment variables if you want invite emails to reference
+a different contact address:
+
+```
+CONTACT_EMAIL=your-email@your-domain.com
+```
+
+Note: This only affects where support/reply emails go — the "from" address of
+the invite email itself is controlled by Supabase's **Authentication → Emails**
+settings in the dashboard.
+
 ## Rolling back
 
 Delete/comment `VITE_APP_MODE` (or set it to `server`) and the app goes back to
