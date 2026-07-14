@@ -91,7 +91,7 @@ async function createInviteLink(admin, email, name, redirectTo) {
   const { data, error } = await admin.auth.admin.generateLink({
     type: "invite",
     email,
-    options: { redirectTo, data: { name: name || "" } },
+    options: { redirectTo, data: { name: name || "", needs_password: true } },
   });
   if (error) return { link: null, error };
   const link = data?.properties?.action_link || data?.properties?.hashed_token && null;
@@ -156,7 +156,7 @@ export default async function handler(req, res) {
 
   const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalizedEmail, {
     redirectTo,
-    data: { name: name || "" },
+    data: { name: name || "", needs_password: true },
   });
 
   if (!inviteErr) {

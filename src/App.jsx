@@ -1392,7 +1392,49 @@ function AuthFlow({ household, onSignedIn, onCreated, remote, onRemoteAuth }) {
           {field("Password", pass, setPass, "password", "")}
           {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13.5, marginBottom: 12 }}>{err}</p>}
           <Btn full accent="#0E7C6B" onClick={doSignin}>Sign in <ArrowRight size={16} /></Btn>
+          <button onClick={() => { setErr(""); setView("forgotpw"); }} className="f-body" style={backLink}>Forgot password?</button>
           <button onClick={() => { setErr(""); setView("welcome"); }} className="f-body" style={backLink}>Back</button>
+        </div>
+      )}
+
+      {view === "forgotpw" && (
+        <div className="rise">
+          <h1 className="f-display" style={{ fontSize: 28, fontWeight: 600, marginBottom: 6 }}>Reset your password</h1>
+          <p className="f-body" style={{ color: FADE, fontSize: 14, marginBottom: 16 }}>
+            Enter your email and we'll send you a link to reset your password.
+          </p>
+          {field("Email", email, setEmail, "email", "you@example.com")}
+          {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13.5, marginBottom: 12 }}>{err}</p>}
+          <Btn full accent="#0E7C6B" disabled={busy} onClick={async () => {
+            setErr("");
+            if (!email) return setErr("Please enter your email");
+            setBusy(true);
+            try {
+              const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: `${typeof window !== "undefined" ? window.location.origin : ""}/auth/callback?type=recovery`,
+              });
+              if (error) throw error;
+              setView("resetsent");
+            } catch (e) { setErr(e.message); }
+            setBusy(false);
+          }}>
+            {busy ? <Loader size={16} className="animate-spin" /> : <>Send Reset Link <ArrowRight size={16} /></>}
+          </Btn>
+          <button onClick={() => { setErr(""); setView("signin"); }} className="f-body" style={backLink}>Back</button>
+        </div>
+      )}
+
+      {view === "resetsent" && (
+        <div className="rise">
+          <div style={{ fontSize: 44, marginBottom: 16, textAlign: "center" }}>📧</div>
+          <h1 className="f-display" style={{ fontSize: 28, fontWeight: 600, marginBottom: 10 }}>Check your email</h1>
+          <p className="f-body" style={{ color: FADE, fontSize: 14, marginBottom: 12 }}>
+            We've sent a password reset link to <strong>{email}</strong>.
+          </p>
+          <p className="f-body" style={{ color: FADE, fontSize: 14, marginBottom: 20 }}>
+            The link expires in 1 hour. If you don't see it, check your spam folder.
+          </p>
+          <Btn full accent="#0E7C6B" onClick={() => { setErr(""); setView("signin"); }}>Back to sign in</Btn>
         </div>
       )}
     </div>
@@ -1405,6 +1447,31 @@ const backLink = { display: "block", margin: "16px auto 0", background: "none", 
 // OTP (existing accounts). New invitees must set a password; existing ones
 // skip that. Both call accept-invite then SetupMember so the member object is
 // built by the same newMember() path as locally-added members.
+
+/** Auth methods from the session JWT `amr` claim (e.g. invite, otp, password). */
+function sessionAuthMethods(session) {
+  try {
+    const part = session?.access_token?.split(".")[1];
+    if (!part) return [];
+    const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+    return (json.amr || []).map((a) => (typeof a === "string" ? a : a?.method)).filter(Boolean);
+  } catch { return []; }
+}
+
+/** True when this invitee still needs a password before cross-device login works.
+ *  Do NOT use account age: inviteUserByEmail creates the auth user at send time,
+ *  so opening the email later looks "old" and wrongly skipped the password step. */
+function inviteeNeedsPassword(user, session) {
+  const flag = user?.user_metadata?.needs_password;
+  if (flag === false) return false;
+  if (flag === true) return true;
+  const methods = sessionAuthMethods(session);
+  if (methods.includes("invite")) return true;
+  if (methods.some((m) => m === "otp" || m === "magiclink" || m === "password" || m === "email")) return false;
+  // On /app/invite with no clear signal, prefer asking — skipping left people locked out.
+  return true;
+}
+
 function InviteLanding({ onDone }) {
   const [step, setStep] = useState("loading"); // loading | password | profile
   const [pass, setPass] = useState("");
@@ -1416,7 +1483,19 @@ function InviteLanding({ onDone }) {
   useEffect(() => {
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        // PKCE / hash exchange can lag behind first paint on /app/invite.
+        let user = (await supabase.auth.getUser()).data?.user;
+        let session = (await supabase.auth.getSession()).data?.session;
+        if (!user || !session) {
+          await new Promise((resolve) => {
+            const t = setTimeout(resolve, 4000);
+            const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+              if (s?.user) { clearTimeout(t); subscription.unsubscribe(); resolve(); }
+            });
+          });
+          user = (await supabase.auth.getUser()).data?.user;
+          session = (await supabase.auth.getSession()).data?.session;
+        }
         if (!user) { setErr("Sign-in link expired — ask for a new invite."); setStep("password"); return; }
 
         // Accept pending invite (existing accounts) or confirm trigger join (new).
@@ -1441,12 +1520,7 @@ function InviteLanding({ onDone }) {
         }
 
         setSeed({ id: user.id, name: memberSeed?.name || user.user_metadata?.name || "", ...memberSeed });
-
-        // Brand-new invitees (inviteUserByEmail) need to set a password.
-        // Existing accounts arriving via magic link already have one.
-        const accountAgeMs = Date.now() - new Date(user.created_at).getTime();
-        const isNewInvitee = accountAgeMs < 15 * 60 * 1000;
-        setStep(isNewInvitee ? "password" : "profile");
+        setStep(inviteeNeedsPassword(user, session) ? "password" : "profile");
       } catch (e) {
         setErr(e.message || "Could not open invite");
         setStep("password");
@@ -1459,7 +1533,10 @@ function InviteLanding({ onDone }) {
     if (pass.length < 6) return setErr("Password needs at least 6 characters.");
     setBusy(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password: pass });
+      const { error } = await supabase.auth.updateUser({
+        password: pass,
+        data: { needs_password: false },
+      });
       if (error) throw error;
       setStep("profile");
     } catch (e) { setErr(e.message); }
@@ -4741,12 +4818,13 @@ function LinguaApp() {
   };
 
   useEffect(() => { (async () => {
-    // Invite-email landing: Supabase's magic link redirects here with a live
-    // session but no lingua-token yet — route to InviteLanding instead of
-    // falling through to the normal signed-out AuthFlow.
+    // Invite-email landing: always pin route to InviteLanding so a slow
+    // PKCE/hash session exchange can't fall through into AuthFlow / household
+    // boot and skip the password step.
     if (isSupabase() && typeof window !== "undefined" && window.location.pathname.startsWith("/app/invite")) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) { setRoute("invite"); setBooted(true); return; }
+      setRoute("invite");
+      setBooted(true);
+      return;
     }
     if (isServer()) {
       try { serverCaps = await srv("/api/config"); } catch {}
@@ -4785,6 +4863,13 @@ function LinguaApp() {
     if (!isSupabase()) return;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session && !signedIn) {
+        // Stay on InviteLanding for /app/invite — don't mark signed-in early
+        // or the password / profile steps never mount.
+        if (typeof window !== "undefined" && window.location.pathname.startsWith("/app/invite")) {
+          try { localStorage.setItem("lingua-token", session.access_token); } catch {}
+          setRoute("invite");
+          return;
+        }
         try {
           const r = await srv("/api/household");
           versionRef.current = r.version;
@@ -4840,7 +4925,33 @@ function LinguaApp() {
   const updateMember = (next) => {
     persist({ ...household, members: household.members.map(m => (m.id === next.id ? next : m)) });
   };
-  const patchMember = (fn) => { const cur = household.members.find(m => m.id === activeId); if (cur) updateMember(fn(cur)); };
+  // patchMember reads/writes household.members via a functional setHousehold so
+  // concurrent patches (e.g. an in-flight async ASR score landing after a
+  // synchronous click-handler write) compose against the freshest pending state
+  // instead of both reading the same stale `household` closure, where whichever
+  // patch's setHousehold call commits last would silently clobber the other.
+  const patchMember = (fn) => {
+    setHousehold(h => {
+      const cur = h?.members.find(m => m.id === activeId);
+      if (!cur) return h;
+      const next = { ...h, members: h.members.map(m => (m.id === activeId ? fn(m) : m)) };
+      householdRef.current = next;
+      if (!isServer()) { saveHousehold(next); return next; }
+      clearTimeout(pushTimer.current);
+      pushTimer.current = setTimeout(async () => {
+        try {
+          const r = await srv("/api/household", { method: "PUT", body: { version: versionRef.current, data: householdRef.current } });
+          if (r.status === 409) {
+            versionRef.current = r.version;
+            setHousehold(streakFix(r.data));
+            setToast("🔄 Updated from another device");
+            setTimeout(() => setToast(null), 2200);
+          } else versionRef.current = r.version;
+        } catch {}
+      }, 700);
+      return next;
+    });
+  };
 
   const observeSkill = (skill, obs) => patchMember(m => observe(m, skill, obs));
 

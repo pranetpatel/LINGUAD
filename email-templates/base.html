@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{subject}}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+      background-color: #f5f5f5;
+      color: #2d3748;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-collapse: collapse;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a5f4a 0%, #2d7a60 100%);
+      padding: 40px 20px;
+      text-align: center;
+      border-bottom: 4px solid #f4e8d8;
+    }
+    .logo {
+      display: inline-block;
+      margin-bottom: 12px;
+    }
+    .logo img {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto;
+      display: block;
+    }
+    .header-text {
+      color: #f4e8d8;
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+    .content {
+      padding: 40px 30px;
+    }
+    .content h1 {
+      font-size: 24px;
+      margin-bottom: 16px;
+      color: #1a5f4a;
+    }
+    .content p {
+      margin-bottom: 16px;
+      color: #4a5568;
+      font-size: 14px;
+    }
+    .cta-button {
+      display: inline-block;
+      background-color: #1a5f4a;
+      color: #f4e8d8;
+      padding: 14px 32px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+      margin: 24px 0;
+      border: 2px solid #1a5f4a;
+      transition: all 0.3s ease;
+    }
+    .cta-button:hover {
+      background-color: #2d7a60;
+      border-color: #2d7a60;
+    }
+    .code-block {
+      background-color: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 16px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      word-break: break-all;
+      margin: 16px 0;
+      color: #1a5f4a;
+      text-align: center;
+      font-weight: 500;
+    }
+    .footer {
+      background-color: #f7fafc;
+      padding: 30px;
+      text-align: center;
+      border-top: 1px solid #e2e8f0;
+      font-size: 12px;
+      color: #718096;
+    }
+    .footer a {
+      color: #1a5f4a;
+      text-decoration: none;
+    }
+    .highlight {
+      color: #1a5f4a;
+      font-weight: 600;
+    }
+    .divider {
+      border: none;
+      border-top: 1px solid #e2e8f0;
+      margin: 24px 0;
+    }
+    .social-links {
+      margin: 20px 0;
+    }
+    .social-links a {
+      display: inline-block;
+      margin: 0 8px;
+      color: #1a5f4a;
+      text-decoration: none;
+      font-size: 12px;
+    }
+    table { width: 100%; }
+    td { padding: 0; }
+  </style>
+</head>
+<body>
+  <table class="container">
+    <tr>
+      <td class="header">
+        <div class="logo">
+          <img src="https://cdn.example.com/lingua-logo.png" alt="Lingua" />
+        </div>
+        <div class="header-text">Lingua</div>
+      </td>
+    </tr>
+    <tr>
+      <td class="content">
+        {{content}}
+      </td>
+    </tr>
+    <tr>
+      <td class="footer">
+        <p>© 2024 Lingua Family. All rights reserved.</p>
+        <div class="social-links">
+          <a href="https://lingua.family">Website</a> •
+          <a href="https://lingua.family/privacy">Privacy Policy</a> •
+          <a href="https://lingua.family/terms">Terms of Service</a>
+        </div>
+        <p style="margin-top: 16px; color: #a0aec0;">
+          If you didn't request this email, you can safely ignore it.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

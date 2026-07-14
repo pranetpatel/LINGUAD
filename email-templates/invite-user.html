@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join a Lingua Household</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+      background-color: #f5f5f5;
+      color: #2d3748;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-collapse: collapse;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a5f4a 0%, #2d7a60 100%);
+      padding: 40px 20px;
+      text-align: center;
+      border-bottom: 4px solid #f4e8d8;
+    }
+    .logo {
+      display: inline-block;
+      margin-bottom: 12px;
+    }
+    .logo img {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto;
+      display: block;
+    }
+    .header-text {
+      color: #f4e8d8;
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+    .content {
+      padding: 40px 30px;
+    }
+    .content h1 {
+      font-size: 24px;
+      margin-bottom: 16px;
+      color: #1a5f4a;
+    }
+    .content p {
+      margin-bottom: 16px;
+      color: #4a5568;
+      font-size: 14px;
+    }
+    .cta-button {
+      display: inline-block;
+      background-color: #1a5f4a;
+      color: #f4e8d8;
+      padding: 14px 32px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+      margin: 24px 0;
+      border: 2px solid #1a5f4a;
+    }
+    .inviter-card {
+      background-color: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 24px 0;
+      text-align: center;
+    }
+    .inviter-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a5f4a;
+      margin-bottom: 4px;
+    }
+    .inviter-text {
+      font-size: 13px;
+      color: #718096;
+    }
+    .benefits {
+      background-color: #f0fdf4;
+      border-left: 4px solid #10b981;
+      padding: 16px;
+      margin: 24px 0;
+      border-radius: 4px;
+    }
+    .benefits h3 {
+      color: #1a5f4a;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+    .benefits ul {
+      margin-left: 20px;
+      font-size: 13px;
+      color: #4a5568;
+    }
+    .benefits li {
+      margin-bottom: 6px;
+    }
+    .footer {
+      background-color: #f7fafc;
+      padding: 30px;
+      text-align: center;
+      border-top: 1px solid #e2e8f0;
+      font-size: 12px;
+      color: #718096;
+    }
+    .footer a {
+      color: #1a5f4a;
+      text-decoration: none;
+    }
+    .highlight {
+      color: #1a5f4a;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <table class="container">
+    <tr>
+      <td class="header">
+        <div class="logo">
+          <img src="https://lingua.family/icon-192.png" alt="Lingua" />
+        </div>
+        <div class="header-text">Lingua</div>
+      </td>
+    </tr>
+    <tr>
+      <td class="content">
+        <h1>Join a Lingua Household! 👋</h1>
+
+        <div class="inviter-card">
+          <div class="inviter-name">{{inviter_name}}</div>
+          <div class="inviter-text">has invited you to join their Lingua household</div>
+        </div>
+
+        <p>Hi {{email}},</p>
+        <p><span class="highlight">{{inviter_name}}</span> has invited you to join their Lingua household to collaborate on language learning together.</p>
+
+        <a href="{{ .InvitationURL }}" class="cta-button">Accept Invitation</a>
+
+        <p style="color: #a0aec0; font-size: 12px;">Or copy and paste this link:</p>
+        <p style="word-break: break-all; color: #718096; font-size: 12px;">{{ .InvitationURL }}</p>
+
+        <div class="benefits">
+          <h3>🌟 With Lingua, you can:</h3>
+          <ul>
+            <li>Learn languages together with family or classmates</li>
+            <li>Track progress across multiple learners</li>
+            <li>Share learning materials and activities</li>
+            <li>Practice pronunciation and speaking skills</li>
+            <li>Access AI-powered language tutoring</li>
+          </ul>
+        </div>
+
+        <p><strong>Already have a Lingua account?</strong> Just click the link above and your account will be added to the household automatically.</p>
+        <p><strong>New to Lingua?</strong> Sign up with this email address when prompted, and you'll join {{inviter_name}}'s household right away.</p>
+
+        <p style="margin-top: 24px; padding-top: 24px; border-top: 1px solid #e2e8f0;">
+          Questions? <a href="https://lingua.family/help" style="color: #1a5f4a;">View our Help Center</a> or <a href="https://lingua.family/contact" style="color: #1a5f4a;">contact support</a>.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td class="footer">
+        <p>© 2024 Lingua Family. All rights reserved.</p>
+        <p style="margin-top: 16px;">
+          <a href="https://lingua.family">Website</a> •
+          <a href="https://lingua.family/privacy">Privacy</a> •
+          <a href="https://lingua.family/terms">Terms</a>
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
