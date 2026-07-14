@@ -1720,6 +1720,8 @@ function InviteSend({ onCancel, onSent }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [doneMsg, setDoneMsg] = useState("");
+  const [inviteLink, setInviteLink] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const send = async (memberSeed) => {
     setErr(""); setBusy(true);
@@ -1732,7 +1734,10 @@ function InviteSend({ onCancel, onSent }) {
       setDoneMsg(result?.message
         || (result?.existingUser
           ? "They already have an account — we emailed them a link to join."
-          : `Invite sent to ${email.trim()}.`));
+          : result?.emailed === false
+            ? "Invite created — send them the link below."
+            : `Invite sent to ${email.trim()}.`));
+      setInviteLink(result?.inviteLink || "");
       setPhase("done");
     } catch (e) { setErr(e.message); }
     setBusy(false);
@@ -1746,7 +1751,29 @@ function InviteSend({ onCancel, onSent }) {
       </div>
       <h1 className="f-display" style={h1s}>Invite sent</h1>
       <p className="f-body" style={{ color: FADE, marginBottom: 24, lineHeight: 1.5 }}>{doneMsg}</p>
-      <Btn full accent="#0E7C6B" onClick={() => onSent()}>Done <ArrowRight size={16} /></Btn>
+      {inviteLink && (
+        <div style={{ marginBottom: 20 }}>
+          <label className="f-body" style={{ ...lbl, marginTop: 0 }}>Invite link</label>
+          <input readOnly value={inviteLink} className="f-body" style={{ ...inputStyle, fontSize: 12 }}
+            onFocus={(e) => e.target.select()} />
+          <Btn full accent="#0E7C6B" style={{ marginTop: 10 }}
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(inviteLink);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                setErr("Couldn't copy — select the link and copy manually.");
+              }
+            }}>
+            {copied ? "Copied" : "Copy link"}
+          </Btn>
+        </div>
+      )}
+      {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13.5, marginBottom: 12 }}>{err}</p>}
+      <Btn full accent={inviteLink ? "#C9B8A0" : "#0E7C6B"} onClick={() => onSent()}>
+        Done <ArrowRight size={16} />
+      </Btn>
     </div>
   );
 
