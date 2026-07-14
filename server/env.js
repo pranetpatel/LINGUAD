@@ -14,6 +14,7 @@ if (fs.existsSync(envPath)) {
 export const DATA_DIR = path.join(dir, "data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 export const PORT = Number(process.env.PORT || 8787);
+export const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || "";
 export const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
 export const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY || "";
 export const ORIGINS = (process.env.CLIENT_ORIGIN || "*").split(",").map(s => s.trim());

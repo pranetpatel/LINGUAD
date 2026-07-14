@@ -27,7 +27,17 @@ if (typeof window !== "undefined" && !window.storage) {
     async delete(key) { localStorage.removeItem("lingua:" + key); return { key, deleted: true }; },
   };
 }
-const getApiKey = () => { try { return localStorage.getItem("lingua-openai-key") || ""; } catch { return ""; } };
+// Device-only mode supports either Claude (Anthropic) or GPT (OpenAI) as the
+// model provider; the key + provider choice are paired so switching providers
+// doesn't accidentally send one provider's key to the other's endpoint.
+const AI_PROVIDER = () => { try { return localStorage.getItem("lingua-ai-provider") || "anthropic"; } catch { return "anthropic"; } };
+const getApiKey = () => {
+  try {
+    return AI_PROVIDER() === "openai"
+      ? (localStorage.getItem("lingua-openai-key") || "")
+      : (localStorage.getItem("lingua-anthropic-key") || "");
+  } catch { return ""; }
+};
 const hasAiAccess = () => { try { return !!(getApiKey() || localStorage.getItem("lingua-skip-key")); } catch { return true; } };
 
 // ── Lingua server mode: multi-device sync + server-held keys ──
@@ -44,7 +54,8 @@ const SRV_URL = () => {
 };
 const SRV_TOKEN = () => { try { return localStorage.getItem("lingua-token") || ""; } catch { return ""; } };
 // Mode defaults to the build's VITE_APP_MODE (see .env.example); a device
-// can still override it from localStorage for local testing.
+// can still override it from localStorage for local testing, or opt into
+// device-only / local-server mode via ModeGate below.
 const APP_MODE = () => { try { return localStorage.getItem("lingua-mode") || import.meta.env.VITE_APP_MODE || "server"; } catch { return import.meta.env.VITE_APP_MODE || "server"; } };
 const isSupabase = () => APP_MODE() === "supabase" && supabaseConfigured;
 const isServer = () => (APP_MODE() === "server" && !!SRV_URL()) || isSupabase();
@@ -225,6 +236,243 @@ function pickVoice(voices, langCode, prefURI, gender) {
   return [...pool].sort((a, b) => score(b) - score(a))[0];
 }
 const SPEEDS = { slow: 0.78, normal: 1.0, native: 1.12 };
+
+/* ── Phase 2: guided conversation packs (Listening Lab trainer) ──
+   Bilingual lines work in both directions: target=es speaks .es (gloss .en),
+   target=en speaks .en (gloss .es). k=1 marks echo-worthy key lines; the
+   learner role-plays every s:1 line in the final step. */
+const GUIDED_CONVOS = [
+  { id: "g_cafe", emoji: "☕", band: "adult", level: "A1",
+    title: { en: "First coffee", es: "Primer café" },
+    scene: { en: "You walk into a café in Mexico City and order.", es: "Entras a un café y pides algo." },
+    lines: [
+      { s: 0, es: "¡Buenos días! ¿Qué le doy?", en: "Good morning! What can I get you?" },
+      { s: 1, es: "Buenos días. Un café con leche, por favor.", en: "Good morning. A coffee with milk, please.", k: 1 },
+      { s: 0, es: "¿Grande o pequeño?", en: "Large or small?" },
+      { s: 1, es: "Grande, por favor.", en: "Large, please." },
+      { s: 0, es: "¿Algo más? Los panes están recién hechos.", en: "Anything else? The pastries are freshly made." },
+      { s: 1, es: "Sí, un pan dulce. ¿Cuánto es?", en: "Yes, a sweet roll. How much is it?", k: 1 },
+      { s: 0, es: "Son sesenta pesos.", en: "That's sixty pesos." },
+      { s: 1, es: "Aquí tiene. ¡Gracias!", en: "Here you go. Thank you!", k: 1 },
+    ],
+    quiz: [
+      { q: { en: "What does the customer order to drink?", es: "¿Qué pide el cliente para tomar?" },
+        opts: { en: ["Black coffee", "Coffee with milk", "Tea", "Juice"], es: ["Café negro", "Café con leche", "Té", "Jugo"] }, a: 1 },
+      { q: { en: "How much is the total?", es: "¿Cuánto cuesta todo?" },
+        opts: { en: ["16 pesos", "60 pesos", "70 pesos", "6 pesos"], es: ["16 pesos", "60 pesos", "70 pesos", "6 pesos"] }, a: 1 },
+    ],
+    words: [
+      { es: "por favor", en: "please", ex: "Un café, por favor." },
+      { es: "¿Cuánto es?", en: "How much is it?", ex: "¿Cuánto es todo?" },
+      { es: "recién hecho", en: "freshly made", ex: "El pan está recién hecho." },
+    ] },
+  { id: "g_meet", emoji: "👋", band: "adult", level: "A1",
+    title: { en: "Meeting a neighbor", es: "Conociendo a un vecino" },
+    scene: { en: "A new neighbor says hello in the elevator.", es: "Un vecino nuevo te saluda en el ascensor." },
+    lines: [
+      { s: 0, es: "¡Hola! Creo que eres nuevo aquí, ¿no?", en: "Hi! I think you're new here, right?" },
+      { s: 1, es: "¡Hola! Sí, me llamo Sam. Mucho gusto.", en: "Hi! Yes, my name is Sam. Nice to meet you.", k: 1 },
+      { s: 0, es: "Mucho gusto, Sam. Yo soy Carmen, del quinto piso.", en: "Nice to meet you, Sam. I'm Carmen, from the fifth floor." },
+      { s: 1, es: "¿De dónde eres, Carmen?", en: "Where are you from, Carmen?", k: 1 },
+      { s: 0, es: "Soy de Guadalajara. ¿Y tú?", en: "I'm from Guadalajara. And you?" },
+      { s: 1, es: "Soy de Toronto. Estoy aprendiendo español.", en: "I'm from Toronto. I'm learning Spanish.", k: 1 },
+      { s: 0, es: "¡Pues hablas muy bien! Bienvenido al edificio.", en: "Well, you speak very well! Welcome to the building." },
+      { s: 1, es: "Gracias. ¡Hasta luego!", en: "Thanks. See you later!" },
+    ],
+    quiz: [
+      { q: { en: "Where does Carmen live?", es: "¿Dónde vive Carmen?" },
+        opts: { en: ["First floor", "Fifth floor", "Next door", "Downstairs"], es: ["Primer piso", "Quinto piso", "Al lado", "Abajo"] }, a: 1 },
+      { q: { en: "Where is Carmen from?", es: "¿De dónde es Carmen?" },
+        opts: { en: ["Toronto", "Mexico City", "Guadalajara", "Madrid"], es: ["Toronto", "Ciudad de México", "Guadalajara", "Madrid"] }, a: 2 },
+    ],
+    words: [
+      { es: "mucho gusto", en: "nice to meet you", ex: "Mucho gusto, Carmen." },
+      { es: "¿De dónde eres?", en: "Where are you from?", ex: "¿De dónde eres tú?" },
+      { es: "hasta luego", en: "see you later", ex: "¡Hasta luego, vecino!" },
+    ] },
+  { id: "g_market", emoji: "🍅", band: "adult", level: "A2",
+    title: { en: "At the market", es: "En el mercado" },
+    scene: { en: "Buying fruit at a street market stall.", es: "Compras fruta en un puesto del mercado." },
+    lines: [
+      { s: 0, es: "¡Pase, pase! ¿Qué va a llevar hoy?", en: "Come in! What will you take today?" },
+      { s: 1, es: "¿A cómo están los mangos?", en: "How much are the mangoes?", k: 1 },
+      { s: 0, es: "A treinta el kilo, están dulcísimos.", en: "Thirty a kilo, they're very sweet." },
+      { s: 1, es: "Deme un kilo, y medio kilo de fresas.", en: "Give me one kilo, and half a kilo of strawberries.", k: 1 },
+      { s: 0, es: "¿Algo más? Tengo aguacates muy buenos.", en: "Anything else? I have very good avocados." },
+      { s: 1, es: "No, gracias, así está bien.", en: "No thanks, that's all.", k: 1 },
+      { s: 0, es: "Son cincuenta y cinco. ¿Le pongo bolsa?", en: "That's fifty-five. Shall I bag it for you?" },
+      { s: 1, es: "Sí, por favor. Que tenga buen día.", en: "Yes, please. Have a good day." },
+    ],
+    quiz: [
+      { q: { en: "What costs thirty per kilo?", es: "¿Qué cuesta treinta el kilo?" },
+        opts: { en: ["Strawberries", "Avocados", "Mangoes", "Bananas"], es: ["Fresas", "Aguacates", "Mangos", "Plátanos"] }, a: 2 },
+      { q: { en: "How many strawberries does the customer buy?", es: "¿Cuántas fresas compra el cliente?" },
+        opts: { en: ["One kilo", "Half a kilo", "Two kilos", "None"], es: ["Un kilo", "Medio kilo", "Dos kilos", "Ninguna"] }, a: 1 },
+    ],
+    words: [
+      { es: "¿A cómo están…?", en: "How much are…?", ex: "¿A cómo están las fresas?" },
+      { es: "medio kilo", en: "half a kilo", ex: "Medio kilo de fresas, por favor." },
+      { es: "así está bien", en: "that's all / that's fine", ex: "No, gracias, así está bien." },
+    ] },
+  { id: "g_friend", emoji: "🧸", band: "child", level: "A1",
+    title: { en: "Making a friend", es: "Haciendo un amigo" },
+    scene: { en: "A new kid at the park wants to play.", es: "Un niño nuevo en el parque quiere jugar." },
+    lines: [
+      { s: 0, es: "¡Hola! ¿Quieres jugar conmigo?", en: "Hi! Do you want to play with me?" },
+      { s: 1, es: "¡Sí! Me llamo Ali. ¿Y tú?", en: "Yes! My name is Ali. And you?", k: 1 },
+      { s: 0, es: "Yo soy Sofía. ¿Te gusta el fútbol?", en: "I'm Sofía. Do you like soccer?" },
+      { s: 1, es: "¡Me gusta mucho! ¿Tienes una pelota?", en: "I like it a lot! Do you have a ball?", k: 1 },
+      { s: 0, es: "¡Sí, mira! Es nueva y muy rápida.", en: "Yes, look! It's new and very fast." },
+      { s: 1, es: "¡Vamos a jugar!", en: "Let's play!", k: 1 },
+    ],
+    quiz: [
+      { q: { en: "What game do they play?", es: "¿A qué juegan?" },
+        opts: { en: ["Soccer", "Tag", "Hide and seek", "Cards"], es: ["Fútbol", "Atrapadas", "Escondidas", "Cartas"] }, a: 0 },
+      { q: { en: "Whose ball is it?", es: "¿De quién es la pelota?" },
+        opts: { en: ["Ali's", "Sofía's", "The teacher's", "Nobody's"], es: ["De Ali", "De Sofía", "De la maestra", "De nadie"] }, a: 1 },
+    ],
+    words: [
+      { es: "jugar", en: "to play", ex: "¿Quieres jugar?" },
+      { es: "la pelota", en: "the ball", ex: "La pelota es rápida." },
+      { es: "¡vamos!", en: "let's go!", ex: "¡Vamos a jugar!" },
+    ] },
+  { id: "g_puppy", emoji: "🐶", band: "child", level: "A1",
+    title: { en: "The lost puppy", es: "El perrito perdido" },
+    scene: { en: "You find a little dog with no owner.", es: "Encuentras un perrito sin dueño." },
+    lines: [
+      { s: 0, es: "¡Mira! Un perrito. Está solo.", en: "Look! A puppy. He's alone." },
+      { s: 1, es: "¿Dónde está tu casa, perrito?", en: "Where is your home, puppy?", k: 1 },
+      { s: 0, es: "Tiene un collar. Dice “Luna”.", en: "He has a collar. It says “Luna”." },
+      { s: 1, es: "¡Hola, Luna! ¿Tienes hambre?", en: "Hi, Luna! Are you hungry?", k: 1 },
+      { s: 0, es: "¡Allí viene una señora corriendo!", en: "A lady is coming, running!" },
+      { s: 1, es: "¡Señora! ¿Es su perrita?", en: "Ma'am! Is this your puppy?", k: 1 },
+      { s: 0, es: "¡Sí! ¡Gracias, gracias! Luna, ¡a casa!", en: "Yes! Thank you, thank you! Luna, home!" },
+    ],
+    quiz: [
+      { q: { en: "What is the puppy's name?", es: "¿Cómo se llama la perrita?" },
+        opts: { en: ["Pip", "Luna", "Sol", "Nube"], es: ["Pip", "Luna", "Sol", "Nube"] }, a: 1 },
+      { q: { en: "Who comes running?", es: "¿Quién viene corriendo?" },
+        opts: { en: ["A boy", "A police officer", "A lady", "A cat"], es: ["Un niño", "Un policía", "Una señora", "Un gato"] }, a: 2 },
+    ],
+    words: [
+      { es: "el perrito", en: "the puppy", ex: "El perrito está solo." },
+      { es: "la casa", en: "the home / house", ex: "¿Dónde está tu casa?" },
+      { es: "tener hambre", en: "to be hungry", ex: "¿Tienes hambre?" },
+    ] },
+];
+
+/* ── Phase 2: the Course — a mastery-gated path from fundamentals up.
+   Each item advances through stages: learn → quiz → build → say (m 0..4).
+   A unit unlocks when the previous one is complete. Direction-agnostic. */
+const PATH_UNITS = [
+  { id: "u0", emoji: "⚡", title: { en: "Power words: the survival core", es: "Palabras clave" }, items: [
+    { es: "quiero", en: "I want", xes: "Quiero agua, por favor.", xen: "I want water, please.", pic: "🤲" },
+    { es: "tengo", en: "I have", xes: "Tengo una pregunta.", xen: "I have a question.", pic: "🎒" },
+    { es: "¿dónde está…?", en: "where is…?", xes: "¿Dónde está el baño?", xen: "Where is the bathroom?", pic: "🧭" },
+    { es: "y / pero", en: "and / but", xes: "Quiero pan y agua, pero no café.", xen: "I want bread and water, but not coffee.", pic: "➕" },
+    { es: "no entiendo", en: "I don't understand", xes: "Lo siento, no entiendo.", xen: "Sorry, I don't understand.", pic: "🤷" },
+  ] },
+  { id: "u1", emoji: "👋", title: { en: "Greetings & introductions", es: "Saludos y presentaciones" }, items: [
+    { es: "hola", en: "hello", xes: "¡Hola! ¿Cómo estás?", xen: "Hello! How are you?", pic: "👋" },
+    { es: "buenos días", en: "good morning", xes: "Buenos días, señora.", xen: "Good morning, ma'am.", pic: "🌅" },
+    { es: "me llamo", en: "my name is", xes: "Me llamo Sam.", xen: "My name is Sam.", pic: "📛" },
+    { es: "mucho gusto", en: "nice to meet you", xes: "Mucho gusto, Carmen.", xen: "Nice to meet you, Carmen.", pic: "🤝" },
+    { es: "adiós", en: "goodbye", xes: "Adiós, hasta mañana.", xen: "Goodbye, see you tomorrow.", pic: "✌️" },
+  ] },
+  { id: "u2", emoji: "🔢", title: { en: "Numbers & how many", es: "Números y cantidades" }, items: [
+    { es: "uno, dos, tres", en: "one, two, three", xes: "Uno, dos, tres, ¡vamos!", xen: "One, two, three, let's go!", pic: "1️⃣2️⃣3️⃣" },
+    { es: "cuatro y cinco", en: "four and five", xes: "Tengo cuatro libros y cinco plumas.", xen: "I have four books and five pens.", pic: "🖐️" },
+    { es: "¿cuántos?", en: "how many?", xes: "¿Cuántos años tienes?", xen: "How many years old are you?", pic: "❓" },
+    { es: "tengo … años", en: "I am … years old", xes: "Tengo ocho años.", xen: "I am eight years old.", pic: "🎂" },
+    { es: "muchos", en: "many / a lot", xes: "Hay muchos gatos aquí.", xen: "There are many cats here.", pic: "🐱🐱🐱" },
+  ] },
+  { id: "u3", emoji: "👪", title: { en: "Family", es: "La familia" }, items: [
+    { es: "la madre", en: "the mother", xes: "Mi madre se llama Rosa.", xen: "My mother is called Rosa.", pic: "👩" },
+    { es: "el padre", en: "the father", xes: "Mi padre trabaja hoy.", xen: "My father works today.", pic: "👨" },
+    { es: "el hermano", en: "the brother", xes: "Mi hermano es pequeño.", xen: "My brother is little.", pic: "👦" },
+    { es: "la familia", en: "the family", xes: "Mi familia es grande.", xen: "My family is big.", pic: "👨‍👩‍👧" },
+    { es: "los abuelos", en: "the grandparents", xes: "Mis abuelos viven lejos.", xen: "My grandparents live far away.", pic: "👵👴" },
+  ] },
+  { id: "u4", emoji: "🍽️", title: { en: "Food & ordering", es: "Comida y pedidos" }, items: [
+    { es: "para mí", en: "for me", xes: "Un taco para mí, por favor.", xen: "A taco for me, please.", pic: "🌮" },
+    { es: "la cuenta", en: "the bill", xes: "La cuenta, por favor.", xen: "The bill, please.", pic: "🧾" },
+    { es: "delicioso", en: "delicious", xes: "¡Este pan es delicioso!", xen: "This bread is delicious!", pic: "😋" },
+    { es: "tengo sed", en: "I'm thirsty", xes: "Tengo sed, quiero agua.", xen: "I'm thirsty, I want water.", pic: "🥤" },
+    { es: "gracias", en: "thank you", xes: "Muchas gracias por todo.", xen: "Thank you very much for everything.", pic: "🙏" },
+  ] },
+  { id: "u5", emoji: "📅", title: { en: "Daily life", es: "La vida diaria" }, items: [
+    { es: "hoy", en: "today", xes: "Hoy es un buen día.", xen: "Today is a good day.", pic: "📅" },
+    { es: "mañana", en: "tomorrow", xes: "Mañana voy a la escuela.", xen: "Tomorrow I go to school.", pic: "🌄" },
+    { es: "la escuela", en: "the school", xes: "La escuela está cerca.", xen: "The school is close.", pic: "🏫" },
+    { es: "el trabajo", en: "the work / job", xes: "El trabajo empieza a las nueve.", xen: "Work starts at nine.", pic: "💼" },
+    { es: "voy a", en: "I'm going to", xes: "Voy a casa ahora.", xen: "I'm going home now.", pic: "🚶" },
+  ] },
+  { id: "u6", emoji: "💛", title: { en: "Feelings: ser & estar", es: "Sentimientos: ser y estar" }, items: [
+    { es: "estoy feliz", en: "I am happy", xes: "Hoy estoy muy feliz.", xen: "Today I am very happy.", pic: "😊" },
+    { es: "estoy cansado", en: "I am tired", xes: "Estoy cansado después de correr.", xen: "I am tired after running.", pic: "😴" },
+    { es: "soy de", en: "I am from", xes: "Soy de Toronto.", xen: "I am from Toronto.", pic: "🌍" },
+    { es: "es difícil", en: "it is hard", xes: "El examen es difícil.", xen: "The exam is hard.", pic: "🧗" },
+    { es: "está bien", en: "it's okay", xes: "No pasa nada, está bien.", xen: "It's nothing, it's okay.", pic: "👌" },
+  ] },
+  { id: "u7", emoji: "💚", title: { en: "Likes & dislikes", es: "Gustos" }, items: [
+    { es: "me gusta", en: "I like", xes: "Me gusta la música.", xen: "I like music.", pic: "💚" },
+    { es: "no me gusta", en: "I don't like", xes: "No me gusta el frío.", xen: "I do not like the cold.", pic: "🚫" },
+    { es: "me encanta", en: "I love it", xes: "¡Me encanta bailar!", xen: "I love dancing!", pic: "🤩" },
+    { es: "prefiero", en: "I prefer", xes: "Prefiero el té.", xen: "I prefer tea.", pic: "⚖️" },
+    { es: "mi favorito", en: "my favorite", xes: "El azul es mi favorito.", xen: "Blue is my favorite.", pic: "⭐" },
+  ] },
+  { id: "u8", emoji: "❓", title: { en: "Question power", es: "Preguntas" }, items: [
+    { es: "¿qué?", en: "what?", xes: "¿Qué es esto?", xen: "What is this?", pic: "❔" },
+    { es: "¿quién?", en: "who?", xes: "¿Quién es ella?", xen: "Who is she?", pic: "🕵️" },
+    { es: "¿cuándo?", en: "when?", xes: "¿Cuándo empieza la clase?", xen: "When does the class start?", pic: "⏰" },
+    { es: "¿por qué?", en: "why?", xes: "¿Por qué estás triste?", xen: "Why are you sad?", pic: "🧐" },
+    { es: "¿cómo?", en: "how?", xes: "¿Cómo se dice esto?", xen: "How do you say this?", pic: "🛠️" },
+  ] },
+];
+const CURRICULUM = [
+  { id: "c1", label: { en: "Foundations", es: "Fundamentos" },
+    blurb: { en: "The survival core: the highest-frequency words that unlock everything else.", es: "Lo esencial: las palabras más frecuentes que abren todo lo demás." },
+    units: ["u0", "u1", "u2"] },
+  { id: "c2", label: { en: "Everyday life", es: "La vida diaria" },
+    blurb: { en: "People, food, and the rhythm of a normal day.", es: "Personas, comida y el ritmo de un día normal." },
+    units: ["u3", "u4", "u5"] },
+  { id: "c3", label: { en: "Expression", es: "Expresión" },
+    blurb: { en: "Feelings, opinions, and the questions that keep a conversation alive.", es: "Sentimientos, opiniones y las preguntas que mantienen viva una conversación." },
+    units: ["u6", "u7", "u8"] },
+];
+
+const pathTerm = (item, target) => target === "es" ? item.es : item.en;
+const gapWordFor = (item, target) => {
+  const ex = (target === "es" ? item.xes : item.xen);
+  const clean = (w) => w.replace(/[.,!?¡¿"'…:;]/g, "");
+  const words = ex.split(/\s+/).map(clean).filter(Boolean);
+  const termWords = (target === "es" ? item.es : item.en).split(/[^\p{L}]+/u).filter(w => w.length >= 3);
+  for (const tw of termWords) {
+    const hit = words.find(w => w.toLowerCase() === tw.toLowerCase());
+    if (hit) return hit;
+  }
+  return words.reduce((a, b) => (b.length > a.length ? b : a), words[0] || "");
+};
+const pathMean = (item, target) => target === "es" ? item.en : item.es;
+const pathEx = (item, target) => target === "es" ? item.xes : item.xen;
+const pathExGloss = (item, target) => target === "es" ? item.xen : item.xes;
+
+/* Composite learning progress: course mastery + tested skills + vocabulary bank
+   + conversation practice, weighted. Every number comes from real activity. */
+function learningProgress(member) {
+  const skills = member.skills || {};
+  const tested = SKILLS.map(k => skills[k]).filter(v => v && v.n > 0).map(v => v.s);
+  const skillPct = tested.length ? (tested.reduce((a, b) => a + b, 0) / tested.length) * 100 : 0;
+  let got = 0, total = 0;
+  PATH_UNITS.forEach(u => u.items.forEach((_, i) => { total += 5; got += Math.min((member.path?.[u.id]?.[i]) || 0, 5); }));
+  const coursePct = total ? (got / total) * 100 : 0;
+  const words = member.deck?.length || 0;
+  const vocabPct = Math.min(100, (words / 120) * 100);
+  const talks = member.stats?.talks || 0;
+  const talkPct = Math.min(100, (talks / 25) * 100);
+  const overall = Math.round(coursePct * 0.35 + skillPct * 0.35 + vocabPct * 0.15 + talkPct * 0.15);
+  return { overall, course: Math.round(coursePct), skills: Math.round(skillPct), vocab: Math.round(vocabPct), talk: Math.round(talkPct), words, talks };
+}
 
 /* Live voice styling: presets multiply into the persona's base voice, and for
    kids a boy/girl kid-voice profile overrides gender + shaping. All of it is
@@ -503,7 +751,7 @@ function useStreamingSTT(langCode, handlersRef) {
 
 /* ───────────────────────────── AI helper ───────────────────────────── */
 
-async function askAI(messages, { system, json = false, maxTokens = 1000 } = {}) {
+async function askClaude(messages, { system, json = false, maxTokens = 1000 } = {}) {
   let msgs = Array.isArray(messages) ? [...messages] : [{ role: "user", content: messages }];
   if (system) {
     if (msgs[0]?.role === "user") msgs[0] = { ...msgs[0], content: `${system}\n\n---\n\n${msgs[0].content}` };
@@ -523,22 +771,37 @@ async function askAI(messages, { system, json = false, maxTokens = 1000 } = {}) 
       throw new Error(errBody.error || `API ${res.status}`);
     }
     data = await res.json();
+  } else if (AI_PROVIDER() === "openai" && getApiKey()) {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + getApiKey() },
+      body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: maxTokens, messages: msgs.map(m => ({ role: m.role, content: m.content })) }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || errBody.error || `API ${res.status}`);
+    }
+    data = await res.json();
   } else {
     const key = getApiKey();
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(key ? { Authorization: `Bearer ${key}` } : {}),
+        ...(key ? { "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" } : {}),
       },
-      body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages: msgs }),
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, messages: msgs }),
     });
-    if (!res.ok) throw new Error(`API ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || errBody.error || `API ${res.status}`);
+    }
     data = await res.json();
   }
-  const text = (isServer())
-    ? (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim()
-    : (data.choices?.[0]?.message?.content || "").trim();
+  // normalize both response shapes: Anthropic content[] blocks or OpenAI choices[]
+  const text = (data.content
+    ? (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n")
+    : (data.choices?.[0]?.message?.content || "")).trim();
   if (!json) return text;
   const clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
   try { return JSON.parse(clean); }
@@ -759,6 +1022,10 @@ const Fonts = () => (
     @keyframes floaty {0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-8px) rotate(2deg)}}
     @keyframes pop {0%{transform:scale(.4);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
     @keyframes pulse-ring {0%{box-shadow:0 0 0 0 rgba(217,91,63,.35)}70%{box-shadow:0 0 0 18px rgba(217,91,63,0)}100%{box-shadow:0 0 0 0 rgba(217,91,63,0)}}
+    @keyframes confetti-fall {0%{transform:translateY(-6vh) rotate(0deg);opacity:1}100%{transform:translateY(108vh) rotate(340deg);opacity:.85}}
+    .hscroll{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x proximity;padding:4px 2px 12px;margin:0 -18px;padding-left:18px;padding-right:18px;scrollbar-width:none}
+    .hscroll::-webkit-scrollbar{display:none}
+    .hscroll>*{scroll-snap-align:start;flex-shrink:0}
     @keyframes shake {0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
     .shake{animation:shake .4s ease}
     @keyframes bounce-bar {0%,100%{height:7px}50%{height:26px}}
@@ -851,10 +1118,71 @@ const pillStyle = {
   border: `1px solid ${LINE}`, borderRadius: 999, padding: "6px 11px", fontSize: 13.5, fontWeight: 600,
 };
 
+/* ───────────── mode gate: family server vs device-only ─────── */
+
+function ModeGate({ onDone }) {
+  const [url, setUrl] = useState("http://localhost:8787");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [expand, setExpand] = useState(false);
+
+  const connect = async () => {
+    setBusy(true); setErr("");
+    try {
+      const clean = url.trim().replace(/\/+$/, "");
+      const r = await fetch(clean + "/api/health").then(x => x.json());
+      if (!r.ok) throw new Error();
+      try {
+        localStorage.setItem("lingua-server-url", clean);
+        localStorage.setItem("lingua-mode", "server");
+      } catch {}
+      try { serverCaps = await fetch(clean + "/api/config").then(x => x.json()); } catch {}
+      onDone();
+    } catch { setErr("Couldn't reach a Lingua server at that address."); }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 30 }}>
+        <Orb accent="#0E7C6B" size={44} />
+        <div className="f-display" style={{ fontWeight: 700, fontSize: 24, letterSpacing: -0.5 }}>Lingua</div>
+      </div>
+      <h1 className="f-display" style={{ fontSize: 30, fontWeight: 600, lineHeight: 1.15, marginBottom: 8 }}>How should Lingua run?</h1>
+      <Card onClick={() => setExpand(true)} style={{ marginBottom: 12, borderColor: expand ? "#0E7C6B" : LINE, borderWidth: expand ? 2 : 1 }}>
+        <div className="f-body" style={{ fontWeight: 600, fontSize: 16 }}>🌐 Connect to your family's server</div>
+        <div className="f-body" style={{ fontSize: 13.5, color: FADE, marginTop: 3 }}>
+          Sync across every device · API keys stay on the server · real pronunciation scoring. Run it with <b>cd server && npm start</b>.
+        </div>
+        {expand && (
+          <div className="rise" style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://api.lingua.family"
+              className="f-body" style={{ ...inputStyle, margin: "0 0 8px" }} aria-label="Server address" />
+            {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13, marginBottom: 8 }}>{err}</p>}
+            <Btn small accent="#0E7C6B" disabled={busy || !url.trim()} onClick={connect}>
+              {busy ? <Loader size={15} className="animate-spin" /> : <>Connect <ArrowRight size={15} /></>}
+            </Btn>
+          </div>
+        )}
+      </Card>
+      <Card onClick={() => { try { localStorage.setItem("lingua-mode", "local"); } catch {} onDone(); }}>
+        <div className="f-body" style={{ fontWeight: 600, fontSize: 16 }}>📱 This device only</div>
+        <div className="f-body" style={{ fontSize: 13.5, color: FADE, marginTop: 3 }}>
+          Everything stays on this device. You'll paste an Anthropic API key on the next screen.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 /* ───────────────── AI connection setup (standalone app) ─────── */
 
 function ApiKeyGate({ onDone }) {
   const [key, setKey] = useState("");
+  const [provider, setProvider] = useState("anthropic");
+  const meta = provider === "openai"
+    ? { name: "OpenAI", model: "GPT-4o mini", from: "platform.openai.com", ph: "sk-…" }
+    : { name: "Anthropic", model: "Claude", from: "console.anthropic.com", ph: "sk-ant-…" };
   return (
     <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 30 }}>
@@ -862,15 +1190,27 @@ function ApiKeyGate({ onDone }) {
         <div className="f-display" style={{ fontWeight: 700, fontSize: 24, letterSpacing: -0.5 }}>Lingua</div>
       </div>
       <h1 className="f-display" style={{ fontSize: 30, fontWeight: 600, lineHeight: 1.15, marginBottom: 10 }}>Connect your tutor's brain</h1>
-      <p className="f-body" style={{ color: FADE, fontSize: 15, lineHeight: 1.55, marginBottom: 20 }}>
-        Lingua's lessons, conversations, and stories are generated live by GPT. Paste an OpenAI API key
-        (get one at <b>platform.openai.com</b>). It's stored only on this device and calls go straight from your
-        browser to OpenAI — usage bills to your key.
+      <p className="f-body" style={{ color: FADE, fontSize: 15, lineHeight: 1.55, marginBottom: 14 }}>
+        Lessons, conversations, and stories are generated live by an AI model of your choice. Your key is stored
+        only on this device and calls go straight from your browser to the provider — usage bills to your key.
       </p>
-      <input type="password" value={key} onChange={e => setKey(e.target.value)} placeholder="sk-…"
-        className="f-body" style={inputStyle} aria-label="OpenAI API key" />
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <Chip label="Claude (Anthropic)" accent="#0E7C6B" selected={provider === "anthropic"} onClick={() => setProvider("anthropic")} />
+        <Chip label="GPT (OpenAI)" accent="#0E7C6B" selected={provider === "openai"} onClick={() => setProvider("openai")} />
+      </div>
+      <p className="f-body" style={{ color: FADE, fontSize: 12.5, marginBottom: 10 }}>
+        {meta.name} key — create one at <b>{meta.from}</b>. Tutoring runs on {meta.model}.
+      </p>
+      <input type="password" value={key} onChange={e => setKey(e.target.value)} placeholder={meta.ph}
+        className="f-body" style={inputStyle} aria-label={`${meta.name} API key`} />
       <Btn full accent="#0E7C6B" disabled={key.trim().length < 12}
-        onClick={() => { try { localStorage.setItem("lingua-openai-key", key.trim()); } catch {} onDone(); }}>
+        onClick={() => {
+          try {
+            localStorage.setItem("lingua-ai-provider", provider);
+            localStorage.setItem(provider === "openai" ? "lingua-openai-key" : "lingua-anthropic-key", key.trim());
+          } catch {}
+          onDone();
+        }}>
         Save & start <ArrowRight size={16} />
       </Btn>
       <button onClick={() => { try { localStorage.setItem("lingua-skip-key", "1"); } catch {} onDone(); }}
@@ -1148,7 +1488,7 @@ function SetupMember({ role, context = "family", defaults = {}, onDone, onCancel
   const startPlacement = async () => {
     setPlacing(true); setQErr(false);
     try {
-      const r = await askAI(
+      const r = await askClaude(
         `Create a 5-question placement quiz for a ${m.native}-speaking learner of ${LANGS[m.target].name}. Questions rise A1→B2, mixing vocabulary and grammar. Respond ONLY with JSON, no fences: {"items":[{"prompt":"...","options":["a","b","c","d"],"answer":0,"cefr":"A1"}]}`,
         { json: true, maxTokens: 900 });
       setQuiz(r.items); setQi(0); setScore(0);
@@ -1599,6 +1939,24 @@ function MicMeter({ active, accent }) {
 
 /* ─────── live voice style panel — changes apply to the next line ────── */
 
+const KID_PRAISE = ["¡Increíble! 🌟", "You're on fire! 🔥", "¡Súper! 🎉", "Wow, so smart! 🧠", "¡Perfecto! ⭐", "Amazing job! 🦄"];
+const STICKERS = ["🦄", "🐸", "🚀", "🌈", "🍩", "🐙", "🏆", "🪁", "🦖", "🧸", "🍉", "⚡"];
+
+function Confetti({ burst }) {
+  if (!burst) return null;
+  const bits = ["🎉", "⭐", "✨", "🌟", "🎈"];
+  return (
+    <div key={burst} style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 70 }} aria-hidden="true">
+      {Array.from({ length: 14 }).map((_, i) => (
+        <span key={i} style={{
+          position: "absolute", left: `${5 + i * 6.6}%`, top: "-6%", fontSize: 18 + (i % 3) * 9,
+          animation: `confetti-fall ${0.9 + (i % 5) * 0.16}s ease-in forwards`, animationDelay: `${(i % 4) * 0.07}s`,
+        }}>{bits[i % bits.length]}</span>
+      ))}
+    </div>
+  );
+}
+
 function VoiceStylePanel({ member, update, tts, accent }) {
   const kid = member.ageBand === "child";
   const shapeNow = voiceShape(member);
@@ -1770,6 +2128,10 @@ function PracticeSay({ target, lang, accent, onScore }) {
 
 function TalkView({ member, tts, accent, addWords, finish, observeSkill, update }) {
   const [voiceSheet, setVoiceSheet] = useState(false);
+  const [coach, setCoach] = useState(true);          // Phase 2: live in-conversation correction
+  const [coachFix, setCoachFix] = useState(null);    // {fix, tip} from the last learner turn
+  const [fixPractice, setFixPractice] = useState(false);
+  const coachRef = useRef(true); coachRef.current = coach;
   const p = member.profile;
   const kid = member.ageBand === "child";
   const tut = tutorFor(member);
@@ -1800,7 +2162,8 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
   }, []);
 
   const sysFor = (sc) =>
-    `${memberBrief(member)}\nLIVE VOICE CONVERSATION. Scenario: ${sc.label}. You LEAD — set the scene, play any characters, move things forward, gently stretch difficulty. React like a human ("Mm!", "¡No way!", a small laugh in words). One question max per turn. 1–2 short sentences ONLY.`;
+    `${memberBrief(member)}\nLIVE VOICE CONVERSATION. Scenario: ${sc.label}. You LEAD — set the scene, play any characters, move things forward, gently stretch difficulty. React like a human ("Mm!", "¡No way!", a small laugh in words). One question max per turn. 1–2 short sentences ONLY.` +
+    (coachRef.current ? `\nLIVE COACH MODE: if the learner's last message contained a language error (grammar, word choice, or a clearly wrong form — ignore typos and accents), append ONE final line in exactly this format: ⟦corrected version of their sentence|very short tip in ${member.profile.native === "es" ? "Spanish" : "English"}⟧ — at most one per turn, nothing when there is no real error. Never mention or read this line; it is machine-parsed.` : "");
 
   const resumeListen = useCallback(() => {
     if (convoRef.current && !busyRef.current) sttRef.current?.start();
@@ -1811,16 +2174,23 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
     const m = [...msgsRef.current, { role: "user", content: text.trim(), conf }];
     setMsgs(m); setTyped(""); setBusy(true); busyRef.current = true;
     if (typeof conf === "number") observeSkill("speaking", Math.max(0.2, Math.min(1, 0.35 + conf * 0.65)));
+    setCoachFix(null); setFixPractice(false);
     let reply = "…sorry, say that again?";
     try {
-      reply = await askAI(m.map(({ role, content }) => ({ role, content })), { system: sysFor(scenario), maxTokens: 220 });
+      reply = await askClaude(m.map(({ role, content }) => ({ role, content })), { system: sysFor(scenario), maxTokens: 260 });
       setAiErr(null);
     } catch (e) {
-      // Was a bare `catch {}` — any failure (missing OPENAI_API_KEY, 503, network,
+      // Was a bare `catch {}` — any failure (missing API key, 503, network,
       // etc.) silently fell back to the same generic line, so testers only ever
       // saw "sorry, say that again?" and it looked like a mic/understanding
       // problem instead of a broken backend. Surface the real reason now.
       setAiErr(e?.message || "AI request failed");
+    }
+    // Live coach: peel the machine-parsed correction off the reply before speaking
+    const cm = reply.match(/⟦([^|⟧]{1,160})\|([^⟧]{1,160})⟧/);
+    if (cm) {
+      reply = reply.replace(cm[0], "").trim() || "¡Muy bien!";
+      if (coachRef.current) setCoachFix({ fix: cm[1].trim(), tip: cm[2].trim() });
     }
     setMsgs([...m, { role: "assistant", content: reply }]);
     setBusy(false); busyRef.current = false;
@@ -1902,7 +2272,7 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
     setScenario(sc); setBusy(true); busyRef.current = true; setDebrief(null); setMsgs([]); setMicErr(false);
     let opener = kid ? "Hi! Ready to play?" : "Hi! Ready when you are.";
     try {
-      opener = await askAI("Open with one short, inviting spoken line.", { system: sysFor(sc), maxTokens: 120 });
+      opener = await askClaude("Open with one short, inviting spoken line.", { system: sysFor(sc), maxTokens: 120 });
       setAiErr(null);
     } catch (e) {
       setAiErr(e?.message || "AI request failed");
@@ -1920,7 +2290,7 @@ function TalkView({ member, tts, accent, addWords, finish, observeSkill, update 
     const userTurns = msgs.filter(m => m.role === "user").length;
     try {
       const transcript = msgs.map(m => `${m.role === "user" ? "LEARNER" : "TUTOR"}: ${m.content}`).join("\n");
-      const d = await askAI(
+      const d = await askClaude(
         `Transcript:\n${transcript}\n\nGive a ${kid ? "super gentle, fun, child-friendly" : "warm"} coaching debrief. Respond ONLY with JSON, no fences:
 {"praise":"1 specific sentence in ${p.native}","corrections":[{"you":"...","better":"natural ${LANGS[p.target].name}","why":"short, in ${p.native}"}],"newWords":[{"term":"...","translation":"${p.native}","example":"..."}],"tip":"one confidence sentence in ${p.native}"}
 Max ${kid ? 1 : 3} corrections (empty array if none), max ${kid ? 2 : 3} newWords.`,
@@ -1952,6 +2322,9 @@ Max ${kid ? 1 : 3} corrections (empty array if none), max ${kid ? 2 : 3} newWord
               <Btn small ghost onClick={() => setVoiceSheet(false)}>Done</Btn>
             </div>
             <p className="f-body" style={{ fontSize: 12.5, color: FADE, margin: "0 0 4px" }}>Changes apply to the very next thing {tut.name} says — even mid-conversation.</p>
+            <div style={{ margin: "6px 0 2px" }}>
+              <Chip label={coach ? "🩹 Live coaching: ON" : "🩹 Live coaching: OFF"} accent={accent} selected={coach} onClick={() => setCoach(c => !c)} />
+            </div>
             <VoiceStylePanel member={member} update={update} tts={tts} accent={accent} />
           </div>
         </div>
@@ -1964,6 +2337,10 @@ Max ${kid ? 1 : 3} corrections (empty array if none), max ${kid ? 2 : 3} newWord
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
         <h1 className="f-display" style={{ fontSize: 28, fontWeight: 600, marginBottom: 4, flex: 1 }}>{kid ? `Talk with ${tut.name}! ${tut.emoji}` : `Talk with ${tut.name}`}</h1>
         <button onClick={() => setVoiceSheet(true)} aria-label="Voice settings" style={{ ...roundBtn(40), flexShrink: 0 }}><SlidersHorizontal size={17} color={FADE} /></button>
+      </div>
+      <div style={{ display: "flex", gap: 8, margin: "6px 0 4px" }}>
+        <Chip label={coach ? (kid ? `🩹 ${tut.name} helps right away: ON` : "🩹 Live coaching: ON") : "🩹 Live coaching: OFF"}
+          accent={accent} selected={coach} onClick={() => setCoach(c => !c)} />
       </div>
       <p className="f-body" style={{ color: FADE, marginBottom: 18 }}>
         {kid ? `Pick an adventure and just talk — ${tut.name} talks back!` : `A real spoken conversation: ${tut.name} leads, plays every character, and saves corrections for the end.`}
@@ -2065,8 +2442,31 @@ Max ${kid ? 1 : 3} corrections (empty array if none), max ${kid ? 2 : 3} newWord
               : <>🎯 Clarity {Math.round(lastUser.conf * 100)}% {lastUser.conf >= 0.85 ? "— crisp" : lastUser.conf >= 0.6 ? "— good" : "— try slower & louder"}</>}
           </div>
         )}
+        {coachFix && (
+          <div className="rise" style={{ marginTop: 12, maxWidth: 420, width: "100%", background: "#FBEAE4", border: "1px solid #E8C4B8", borderRadius: 16, padding: "12px 14px", textAlign: "left" }}>
+            <div className="f-body" style={{ fontSize: 12, fontWeight: 700, letterSpacing: .5, color: "#A0453A", marginBottom: 4 }}>
+              {kid ? `${tut.emoji} ${tut.name.toUpperCase()} SAYS TRY:` : "🩹 QUICK FIX"}
+            </div>
+            <div className="f-body" style={{ fontSize: 15, fontWeight: 600 }}>
+              “{coachFix.fix}”
+              <button onClick={() => tts.say(coachFix.fix)} aria-label="Hear the correct version" style={iconBtn}><Volume2 size={15} color="#A0453A" /></button>
+            </div>
+            <div className="f-body" style={{ fontSize: 12.5, color: "#8A5245", marginTop: 3 }}>{coachFix.tip}</div>
+            {!fixPractice ? (
+              <div style={{ marginTop: 8 }}>
+                <Btn small ghost onClick={() => { stopConvo(); setFixPractice(true); }}>🎯 {kid ? "Say it with me!" : "Say it — get scored"}</Btn>
+              </div>
+            ) : (
+              <div style={{ marginTop: 8 }}>
+                <PracticeSay target={coachFix.fix} lang={p.target} accent={accent}
+                  onScore={(sc) => { observeSkill("speaking", Math.max(0.2, sc / 100)); if (sc >= 60) sfx("ding"); }} />
+                <Btn small ghost onClick={() => { setCoachFix(null); setFixPractice(false); startConvo(); }} style={{ marginTop: 6 }}>Back to the conversation →</Btn>
+              </div>
+            )}
+          </div>
+        )}
         {micErr && <div className="f-body" style={{ fontSize: 12.5, color: "#A0453A", marginTop: 8 }}>Microphone access was blocked — you can type below, and {tut.name} will still talk.</div>}
-        {aiErr && <div className="f-body" style={{ fontSize: 12.5, color: "#A0453A", marginTop: 8 }}>AI backend error: {aiErr} — check that OPENAI_API_KEY is set on the server.</div>}
+        {aiErr && <div className="f-body" style={{ fontSize: 12.5, color: "#A0453A", marginTop: 8 }}>AI backend error: {aiErr} — check that the AI provider key is set on the server.</div>}
       </div>
 
       {/* controls */}
@@ -2184,7 +2584,7 @@ function StoryView({ member, tts, accent, addWords, finish, observeSkill }) {
   const generate = async () => {
     setLoading(true); setErr(false); setStory(null); setSi(0); setStars(0); setDone(false);
     try {
-      const s = await askAI(
+      const s = await askClaude(
         `${memberBrief(member)}\n\nWrite a 5-scene interactive picture story for this child about one of their interests. Respond ONLY with JSON, no fences:
 {"title":"fun title in ${p.native}","scenes":[{"emoji":["3-5 emoji that paint the scene"],"bg":["#hex","#hex"],"text":"1-2 VERY short ${LANGS[p.target].name} sentences (level ${p.level})","gloss":"${p.native} meaning","question":null or {"prompt":"playful question in ${p.native} about the scene or a ${LANGS[p.target].name} word in it","options":["3 short options"],"answer":0}}],"words":[{"term":"${LANGS[p.target].name} word from the story","translation":"${p.native}","example":"short line"}],"ending":"one happy closing line in ${p.native}"}
 Scenes 2 and 4 must include a question; others null. Soft pastel bg colors. Wholesome, silly, magical — never scary. 2 words.`,
@@ -2313,7 +2713,7 @@ function LessonView({ member, tts, accent, addWords, finish, exit, observeSkill,
   const generate = useCallback(async () => {
     setLoading(true); setErr(false);
     try {
-      const l = await askAI(
+      const l = await askClaude(
         `${memberBrief(member)}\n\nGenerate today's ${kid ? "playful mini-" : ""}lesson ${assignedTopic ? `on the topic the teacher assigned: "${assignedTopic}" — build the whole lesson around it, flavored with the learner's interests` : "themed on the learner's interests"}. Respond ONLY with JSON, no fences:
 {"title":"short title in ${p.native}","intro":"2 ${kid ? "excited, kid-friendly" : "warm"} sentences in ${p.native}","vocab":[{"term":"...","emoji":"one emoji","ipa":"IPA","translation":"${p.native}","example":"short ${LANGS[p.target].name} sentence","exampleGloss":"${p.native}"}],"exercises":[{"prompt":"question, may include a ___ blank","options":["4 options"],"answer":0,"explain":"1 sentence in ${p.native}"}],"culture":"one fun ${kid ? "kid-friendly " : ""}fact in ${p.native}, 1-2 sentences"}
 Exactly ${kid ? 4 : 5} vocab items at level ${p.level}, exactly ${kid ? 3 : 4} exercises practicing them. Never test a word before teaching it.`,
@@ -2456,7 +2856,604 @@ const CHANNELS = [
   { id: "news", emoji: "📰", label: "News brief", speakers: 1 },
 ];
 
+const shuffle = (a) => { const x = [...a]; for (let i = x.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [x[i], x[j]] = [x[j], x[i]]; } return x; };
+
+function CourseView({ member, update, tts, accent, addWords, finish, exit, observeSkill }) {
+  const p = member.profile;
+  const t = p.target, n = p.native === "es" ? "es" : "en";
+  const kid = member.ageBand === "child";
+  const prog = member.path || {};
+  const itemM = (u, i) => (prog[u.id]?.[i]) || 0; // mastery stage 0..5: hear → pick → fill → build → say
+  const unitDone = (u) => u.items.every((_, i) => itemM(u, i) >= 5);
+  const unitPct = (u) => Math.round(u.items.reduce((a, _, i) => a + Math.min(itemM(u, i), 5), 0) / (u.items.length * 5) * 100);
+  const unlocked = (idx) => idx === 0 || unitDone(PATH_UNITS[idx - 1]);
+
+  const [unit, setUnit] = useState(null);
+  const [queue, setQueue] = useState([]);   // [{i}] item indices to work through
+  const [misses, setMisses] = useState(0);
+  const [picked, setPicked] = useState(null);
+  const [order, setOrder] = useState([]);   // builder: tapped words
+  const [pool, setPool] = useState([]);     // builder: remaining chips
+  const [buildWrong, setBuildWrong] = useState(0);
+  const [fillPick, setFillPick] = useState(null);
+  const [fillWrong, setFillWrong] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [burst, setBurst] = useState(0);
+  const [wonSticker, setWonSticker] = useState(null);
+  const [creative, setCreative] = useState(null); // {prompt} | {feedback, pass}
+  const [creativeDraft, setCreativeDraft] = useState("");
+  const [creativeBusy, setCreativeBusy] = useState(false);
+
+  const setMastery = (u, i, m) => {
+    const next = { ...prog, [u.id]: { ...(prog[u.id] || {}), [i]: m } };
+    update({ ...member, path: next });
+  };
+
+  const openUnit = (u) => {
+    const q = u.items.map((_, i) => i).filter(i => itemM(u, i) < 5);
+    setUnit(u); setQueue(q); setMisses(0); setStreak(0); resetExercise();
+  };
+  const resetExercise = () => { setPicked(null); setOrder([]); setPool([]); setBuildWrong(0); setFillPick(null); setFillWrong(0); };
+
+  const cur = unit && queue.length ? { i: queue[0], item: unit.items[queue[0]], m: itemM(unit, queue[0]) } : null;
+
+  useEffect(() => { // builder setup when entering the build stage
+    if (cur && cur.m === 3 && pool.length === 0 && order.length === 0) {
+      setPool(shuffle(pathEx(cur.item, t).replace(/[.!?¡¿,]/g, "").split(/\s+/)));
+    }
+  }, [cur?.i, cur?.m]);
+
+  useEffect(() => { // input before output: every stage opens with audio
+    if (!cur) return;
+    const tm = setTimeout(() => {
+      if (cur.m === 0 || cur.m === 2) tts.say(pathEx(cur.item, t));
+      else if (cur.m === 1) tts.say(pathTerm(cur.item, t));
+    }, 350);
+    return () => clearTimeout(tm);
+  }, [cur?.i, cur?.m]);
+
+  const advance = (passed) => {
+    if (!cur) return;
+    sfx(passed ? "ding" : "soft");
+    setStreak(st => passed ? st + 1 : 0);
+    if (passed && kid) setBurst(b => b + 1);
+    let q = queue.slice(1);
+    if (passed) {
+      const m2 = cur.m + 1;
+      setMastery(unit, cur.i, m2);
+      if (m2 < 5) q = [...q, cur.i];                 // interleaved: next stage comes back around
+    } else {
+      setMisses(x => x + 1);
+      q = [...q.slice(0, 2), cur.i, ...q.slice(2)];  // spaced retry — soon, not instantly
+    }
+    resetExercise();
+    setQueue(q);
+    if (!q.length) {
+      if (kid) {
+        const owned = member.stickers || [];
+        const avail = STICKERS.filter(x => !owned.includes(x));
+        if (avail.length) {
+          const pick = avail[Math.floor(Math.random() * avail.length)];
+          setWonSticker(pick);
+          update({ ...member, stickers: [...owned, pick], path: { ...prog, [unit.id]: { ...(prog[unit.id] || {}), [cur.i]: cur.m + 1 } } });
+        }
+      }
+      beginCreative();
+    }
+  };
+
+  const beginCreative = async () => {
+    if (!navigator.onLine || !hasAiAccess()) { finish(25); return; }
+    setCreativeBusy(true);
+    try {
+      const two = shuffle(unit.items).slice(0, 2).map(it => pathTerm(it, t)).join('" y "');
+      const c = await askClaude(
+        `${memberBrief(member)}\nThe learner just mastered the unit "${unit.title.en}". Respond ONLY with JSON, no fences: {"prompt":"one short creative challenge in ${p.native} asking them to write or say ONE ${LANGS[t].name} sentence using \"${two}\" — make it playful and personal${kid ? ", kid-friendly, from their animal tutor" : ""}"}`,
+        { json: true, maxTokens: 200 });
+      setCreative({ prompt: c.prompt });
+    } catch { finish(25); }
+    setCreativeBusy(false);
+  };
+
+  const judgeCreative = async () => {
+    if (!creativeDraft.trim()) return;
+    setCreativeBusy(true);
+    try {
+      const r = await askClaude(
+        `${memberBrief(member)}\nChallenge given: "${creative.prompt}"\nLearner's ${LANGS[t].name} answer: "${creativeDraft}"\nRespond ONLY with JSON, no fences: {"pass":true/false,"feedback":"2 short encouraging sentences in ${p.native}; if there's an error, give the corrected sentence"}`,
+        { json: true, maxTokens: 220 });
+      setCreative({ ...creative, done: true, pass: !!r.pass, feedback: r.feedback });
+      observeSkill("grammar", r.pass ? 1 : 0.4);
+      sfx(r.pass ? "chime" : "soft");
+    } catch { setCreative({ ...creative, done: true, pass: true, feedback: "" }); }
+    setCreativeBusy(false);
+  };
+
+  /* ── unit map: curriculum chapters with scrollable unit cards ── */
+  if (!unit) {
+    const flat = PATH_UNITS;
+    const flatIdx = (uid) => flat.findIndex(x => x.id === uid);
+    const currentIdx = flat.findIndex((u, i) => unlocked(i) && !unitDone(u));
+    const unitsDone = flat.filter(unitDone).length;
+    const itemsMastered = flat.reduce((a, u) => a + u.items.filter((_, i) => itemM(u, i) >= 5).length, 0);
+    const itemsTotal = flat.reduce((a, u) => a + u.items.length, 0);
+    const chapterState = (c) => {
+      const us = c.units.map(uid => flat[flatIdx(uid)]);
+      const done = us.filter(unitDone).length;
+      const open = unlocked(flatIdx(c.units[0]));
+      return { done, total: us.length, open };
+    };
+    return (
+      <Screen exit={exit} title={kid ? "Course adventure 🗺️" : "Course path"}>
+        <Card style={{ padding: 16, marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "baseline", marginBottom: 8 }}>
+            <div className="f-body" style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: FADE, flex: 1 }}>
+              {kid ? "🗺️ MY QUEST" : "CURRICULUM"}
+            </div>
+            <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>
+              {unitsDone}/{flat.length} units · {itemsMastered}/{itemsTotal} {kid ? "words won" : "items mastered"}
+            </div>
+          </div>
+          <div style={{ height: 8, borderRadius: 4, background: "#E8EEEB" }} role="progressbar" aria-valuenow={itemsMastered} aria-valuemin={0} aria-valuemax={itemsTotal}>
+            <div style={{ height: 8, borderRadius: 4, width: `${itemsTotal ? (itemsMastered / itemsTotal) * 100 : 0}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
+          </div>
+          {!kid && <p className="f-body" style={{ fontSize: 12.5, color: FADE, margin: "10px 0 0" }}>
+            Frequency-first, taught inside real sentences: hear → pick → fill → build → say. Mastery unlocks the next unit.
+          </p>}
+        </Card>
+
+        {CURRICULUM.map((c, ci) => {
+          const st = chapterState(c);
+          return (
+            <div key={c.id} style={{ marginBottom: 26 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <div className="f-body" style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.4, color: st.open ? accent : "#9AA8A3" }}>
+                  {kid ? `WORLD ${ci + 1}` : `CHAPTER ${ci + 1}`}
+                </div>
+                <div className="f-body" style={{ fontSize: 11.5, color: FADE, marginLeft: "auto" }}>
+                  {st.done}/{st.total} {st.done === st.total ? "✓" : ""}
+                </div>
+              </div>
+              <h2 className="f-display" style={{ fontSize: 21, fontWeight: 600, margin: "3px 0 2px", color: st.open ? INK : "#9AA8A3" }}>{c.label[n]}</h2>
+              <p className="f-body" style={{ fontSize: 12.5, color: FADE, margin: "0 0 10px" }}>{c.blurb[n]}</p>
+              <div className="hscroll">
+                {c.units.map(uid => {
+                  const idx = flatIdx(uid);
+                  const u = flat[idx];
+                  const open = unlocked(idx), done = unitDone(u), pct = unitPct(u);
+                  const current = idx === currentIdx;
+                  return (
+                    <div key={uid} role="button" tabIndex={open ? 0 : -1}
+                      aria-label={`Unit ${idx + 1}: ${u.title[n]}${done ? ", complete" : open ? `, ${pct}% done` : ", locked"}`}
+                      onClick={() => open && openUnit(u)}
+                      onKeyDown={(e) => { if (open && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openUnit(u); } }}
+                      style={{
+                        width: 158, background: "#fff", borderRadius: 18, padding: "16px 14px 14px",
+                        border: current ? `2px solid ${accent}` : done ? "1.5px solid #BBDCD4" : "1.5px solid #DCE5E1",
+                        boxShadow: current ? "0 10px 26px rgba(14,124,107,.18)" : "0 2px 8px rgba(21,37,33,.05)",
+                        cursor: open ? "pointer" : "default", opacity: open ? 1 : .55, position: "relative",
+                      }}>
+                      {done && <span style={{ position: "absolute", top: 10, right: 10, fontSize: 14 }}>✅</span>}
+                      {!open && <span style={{ position: "absolute", top: 10, right: 10, fontSize: 13 }}>🔒</span>}
+                      <div style={{
+                        width: 46, height: 46, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 24, background: done ? "#E3F1EE" : current ? `${accent}1A` : "#F1F5F3", marginBottom: 10,
+                      }}>{u.emoji}</div>
+                      <div className="f-body" style={{ fontSize: 11, fontWeight: 700, letterSpacing: .6, color: "#9AA8A3" }}>UNIT {idx + 1}</div>
+                      <div className="f-body" style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.25, minHeight: 34, margin: "2px 0 8px" }}>{u.title[n]}</div>
+                      <div style={{ height: 5, borderRadius: 3, background: "#E8EEEB" }}>
+                        <div style={{ height: 5, borderRadius: 3, width: `${pct}%`, background: done ? "#0E7C6B" : accent, transition: "width .3s" }} />
+                      </div>
+                      <div className="f-body" style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: FADE, marginTop: 5 }}>
+                        <span>{u.items.length} {kid ? "words" : "items"}</span><span>{pct}%</span>
+                      </div>
+                      {current && (
+                        <div className="f-body" style={{
+                          marginTop: 9, textAlign: "center", background: accent, color: "#fff",
+                          borderRadius: 999, padding: "5px 0", fontSize: 11, fontWeight: 700, letterSpacing: .5,
+                        }}>{pct > 0 ? "CONTINUE" : "START"} →</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </Screen>
+    );
+  }
+
+  /* ── unit complete: creative round or exit ── */
+  if (!cur) return (
+    <Screen exit={() => setUnit(null)} title={`${unit.emoji} ${unit.title[n]}`}>
+      {creativeBusy && <Thinking accent={accent} label={creative ? "Reading your answer…" : "One creative challenge…"} />}
+      {!creativeBusy && creative && !creative.done && (<div>
+        <div className="f-body" style={{ fontSize: 12.5, fontWeight: 700, color: "#8A6A1F", marginBottom: 8 }}>✨ CREATIVE ROUND</div>
+        <Card style={{ padding: 16, marginBottom: 12, background: "#FAF0DA" }}>
+          <p className="f-body" style={{ fontSize: 15 }}>{creative.prompt}</p>
+        </Card>
+        <textarea value={creativeDraft} onChange={e => setCreativeDraft(e.target.value)} rows={2}
+          placeholder={LANGS[t].name + "…"} className="f-body" style={{ ...inputStyle, resize: "none" }} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn accent={accent} onClick={judgeCreative} disabled={!creativeDraft.trim()}>Check it <Send size={14} /></Btn>
+          <Btn ghost onClick={() => finish(25)}>Skip</Btn>
+        </div>
+      </div>)}
+      {!creativeBusy && creative?.done && (<div style={{ textAlign: "center", paddingTop: 20 }}>
+        <div style={{ fontSize: 52 }}>{creative.pass ? "🌟" : "💪"}</div>
+        <h2 className="f-display" style={{ fontSize: 24, fontWeight: 600, margin: "10px 0 8px" }}>{creative.pass ? (kid ? "Amazing sentence!" : "Unit mastered") : "So close!"}</h2>
+        {creative.feedback && <p className="f-body" style={{ color: FADE, fontSize: 14, marginBottom: 16 }}>{creative.feedback}</p>}
+        <Btn full accent={accent} onClick={() => finish(creative.pass ? 30 : 25)}>Collect XP <Star size={15} /></Btn>
+      </div>)}
+      {!creativeBusy && !creative && (<div style={{ textAlign: "center", paddingTop: 26 }}>
+        {kid && <Confetti burst={1} />}
+        <div style={{ fontSize: 52 }}>{wonSticker || "🎓"}</div>
+        <h2 className="f-display" style={{ fontSize: 24, fontWeight: 600, margin: "10px 0 8px" }}>{kid ? "Level beaten!" : "Unit complete"}</h2>
+        {wonSticker && <p className="f-body" style={{ fontSize: 15, color: "#8A6A1F", marginBottom: 10 }}>You won a <b>{wonSticker}</b> sticker for your collection!</p>}
+        <Btn full accent={accent} onClick={() => finish(25)}>Collect {kid ? "stars" : "25 XP"} <Star size={15} /></Btn>
+      </div>)}
+    </Screen>
+  );
+
+  /* ── exercise machine ── */
+  const term = pathTerm(cur.item, t), mean = pathMean(cur.item, t);
+  const ex = pathEx(cur.item, t), exG = pathExGloss(cur.item, t);
+  const gap = gapWordFor(cur.item, t);
+  const remaining = queue.length;
+  const distractors = (k) => shuffle(unit.items.filter((_, i) => i !== cur.i)).slice(0, k).map(it => pathMean(it, t));
+  const mcqItems = cur.m === 1 ? shuffle([cur.item, ...shuffle(unit.items.filter((_, i) => i !== cur.i)).slice(0, 2)]) : [];
+  const gapChips = cur.m === 2
+    ? shuffle([gap, ...shuffle(unit.items.filter((_, i) => i !== cur.i)).slice(0, 2).map(it => gapWordFor(it, t))])
+    : [];
+  const highlight = (text, word) => {
+    const idx = text.toLowerCase().indexOf(word.toLowerCase());
+    if (idx < 0) return text;
+    return (<>{text.slice(0, idx)}<span style={{ color: accent, fontWeight: 700 }}>{text.slice(idx, idx + word.length)}</span>{text.slice(idx + word.length)}</>);
+  };
+  const gapped = (text, word) => {
+    const idx = text.toLowerCase().indexOf(word.toLowerCase());
+    if (idx < 0) return text;
+    return (<>{text.slice(0, idx)}<span style={{ borderBottom: `2.5px solid ${accent}`, minWidth: 56, display: "inline-block", textAlign: "center", color: fillPick ? (fillPick === gap ? "#0E7C6B" : "#C64F3B") : "transparent" }}>{fillPick || word}</span>{text.slice(idx + word.length)}</>);
+  };
+
+  return (
+    <Screen exit={() => setUnit(null)} title={`${unit.emoji} ${unit.title[n]}`}>
+      {kid && <Confetti burst={burst} />}
+      {kid && streak >= 2 && (
+        <div className="rise f-body" key={streak} style={{ textAlign: "center", fontSize: 15, fontWeight: 700, color: "#8A6A1F", marginBottom: 8 }}>
+          {KID_PRAISE[streak % KID_PRAISE.length]} {streak} in a row!
+        </div>
+      )}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 8 }} aria-label="Stage progress">
+          {["Hear", "Pick", "Fill", "Build", "Say"].map((st, i) => (
+            <div key={st} style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ height: 5, borderRadius: 3, background: i < cur.m ? "#0E7C6B" : i === cur.m ? accent : "#DCE5E1" }} />
+              <span className="f-body" style={{ fontSize: 10, fontWeight: 700, letterSpacing: .4, color: i === cur.m ? accent : i < cur.m ? "#0E7C6B" : "#9AA8A3" }}>{st.toUpperCase()}</span>
+            </div>
+          ))}
+        </div>
+        <div className="f-body" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontWeight: 700, color: FADE }}>
+          <span style={{ display: "flex", gap: 4 }} aria-label="Items in this unit">
+            {unit.items.map((_, i) => {
+              const m = itemM(unit, i);
+              return <span key={i} style={{ width: 9, height: 9, borderRadius: "50%", background: m >= 5 ? "#0E7C6B" : i === cur.i ? accent : m > 0 ? "#D9A441" : "#DCE5E1", outline: i === cur.i ? `2px solid ${accent}44` : "none" }} />;
+            })}
+          </span>
+          <span>{streak >= 2 ? `🔥 ${streak} in a row · ` : ""}{remaining} to go</span>
+        </div>
+      </div>
+
+      {cur.m === 0 && (<div>
+        <p className="f-body" style={{ fontSize: 13, color: FADE, marginBottom: 10 }}>{kid ? "Listen! Your new words live inside this sentence: 👂" : "New language arrives inside a real sentence — listen first."}</p>
+        <Card style={{ padding: 20, textAlign: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: kid ? 54 : 44, marginBottom: 8 }}>{cur.item.pic}</div>
+          <div className="f-display" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.35 }}>
+            “{highlight(ex, gap)}”
+          </div>
+          <div className="f-body" style={{ fontSize: 13, color: FADE, marginTop: 6 }}>{exG}</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 14 }}>
+            <Btn small ghost onClick={() => tts.say(ex)}><Volume2 size={14} /> Again</Btn>
+            <Btn small ghost onClick={() => tts.say(term)}><Volume2 size={14} /> Just “{term}”</Btn>
+          </div>
+          <div className="f-body" style={{ fontSize: 14, marginTop: 14, padding: "10px 12px", background: "#F1F5F3", borderRadius: 12 }}>
+            <b style={{ color: accent }}>{term}</b> = {mean}
+          </div>
+        </Card>
+        <Btn full accent={accent} onClick={() => advance(true)}>{kid ? "I heard it! ⭐" : "Got it"} <ArrowRight size={15} /></Btn>
+      </div>)}
+
+      {cur.m === 1 && (<div>
+        <h2 className="f-display" style={{ fontSize: 22, fontWeight: 600, marginBottom: 4 }}>
+          🔊 “{term}”
+          <button onClick={() => tts.say(term)} aria-label="Hear it again" style={iconBtn}><Volume2 size={16} color={FADE} /></button>
+        </h2>
+        <p className="f-body" style={{ fontSize: 13.5, color: FADE, marginBottom: 14 }}>Pick the picture that matches:</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          {mcqItems.map((it, i) => {
+            const right = it === cur.item;
+            return (
+              <Card key={i} onClick={() => { if (picked === null) { setPicked(it); setTimeout(() => advance(right), 750); } }} style={{
+                padding: "16px 8px", textAlign: "center",
+                border: picked === null ? "1.5px solid #DCE5E1" : right ? "2px solid #0E7C6B" : picked === it ? "2px solid #C64F3B" : "1.5px solid #DCE5E1",
+                background: picked !== null && right ? "#E3F1EE" : "#fff",
+              }}>
+                <div style={{ fontSize: kid ? 40 : 34 }}>{it.pic}</div>
+                <div className="f-body" style={{ fontSize: 12.5, marginTop: 6, color: FADE }}>{pathMean(it, t)}</div>
+              </Card>
+            );
+          })}
+        </div>
+      </div>)}
+
+      {cur.m === 2 && (<div>
+        <h2 className="f-display" style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Complete the sentence</h2>
+        <p className="f-body" style={{ fontSize: 13.5, color: FADE, marginBottom: 12 }}>“{exG}”</p>
+        <Card style={{ padding: 18, marginBottom: 14, textAlign: "center" }}>
+          <div style={{ fontSize: 34, marginBottom: 6 }}>{cur.item.pic}</div>
+          <div className="f-display" style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.4 }}>“{gapped(ex, gap)}”</div>
+          <Btn small ghost onClick={() => tts.say(ex)} style={{ marginTop: 10 }}><Volume2 size={13} /> Hear the whole thing</Btn>
+        </Card>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+          {gapChips.map((w, i) => (
+            <Chip key={i} label={w} accent={accent} selected={fillPick === w}
+              onClick={() => {
+                if (fillPick === gap) return;
+                setFillPick(w);
+                if (w.toLowerCase() === gap.toLowerCase()) {
+                  sfx("ding");
+                  setTimeout(() => { tts.say(ex); }, 150);
+                  setTimeout(() => advance(true), 1400);
+                } else if (fillWrong >= 1) {
+                  setTimeout(() => { setFillPick(gap); setTimeout(() => advance(false), 1200); }, 500);
+                } else { setFillWrong(1); sfx("soft"); setTimeout(() => setFillPick(null), 700); }
+              }} />
+          ))}
+        </div>
+        {fillWrong >= 1 && fillPick === null && <p className="f-body" style={{ fontSize: 12.5, color: "#8A6A1F", marginTop: 10, textAlign: "center" }}>Listen once more — the sound gives it away. 👂</p>}
+      </div>)}
+
+      {cur.m === 3 && (<div>
+        <h2 className="f-display" style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Build the sentence</h2>
+        <p className="f-body" style={{ fontSize: 13.5, color: FADE, marginBottom: 12 }}>“{exG}”</p>
+        <Card style={{ padding: 14, minHeight: 54, marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {order.map((w, i) => <Chip key={i} label={w} accent={accent} selected onClick={() => { setOrder(order.filter((_, j) => j !== i)); setPool([...pool, w]); }} />)}
+            {!order.length && <span className="f-body" style={{ fontSize: 12.5, color: "#9AA8A3" }}>Tap the words in order…</span>}
+          </div>
+        </Card>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          {pool.map((w, i) => <Chip key={i} label={w} accent={accent} onClick={() => { setOrder([...order, w]); setPool(pool.filter((_, j) => j !== i)); }} />)}
+        </div>
+        {!pool.length && order.length > 0 && (
+          <Btn full accent={accent} onClick={() => {
+            const want = ex.replace(/[.!?¡¿,]/g, "").split(/\s+/).join(" ").toLowerCase();
+            const got = order.join(" ").toLowerCase();
+            if (got === want) advance(true);
+            else if (buildWrong >= 1) { setPicked("show"); }
+            else { setBuildWrong(1); sfx("soft"); setPool(shuffle([...order])); setOrder([]); }
+          }}>Check <Check size={15} /></Btn>
+        )}
+        {buildWrong >= 1 && picked !== "show" && <p className="f-body" style={{ fontSize: 12.5, color: "#8A6A1F", marginTop: 8 }}>Not quite — try once more. Tip: listen first. <button onClick={() => tts.say(ex)} style={iconBtn}><Volume2 size={13} color={FADE} /></button></p>}
+        {picked === "show" && (<div style={{ marginTop: 10 }}>
+          <p className="f-body" style={{ fontSize: 14 }}>It goes: <b>“{ex}”</b></p>
+          <Btn small accent={accent} style={{ marginTop: 8 }} onClick={() => advance(false)}>Okay — I'll see it again soon</Btn>
+        </div>)}
+      </div>)}
+
+      {cur.m === 4 && (<div>
+        <h2 className="f-display" style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Now say it</h2>
+        <Card style={{ padding: 16, marginBottom: 12 }}>
+          <div className="f-display" style={{ fontSize: 18, fontWeight: 600 }}>
+            “{ex}”
+            <button onClick={() => tts.say(ex)} aria-label="Hear it" style={iconBtn}><Volume2 size={15} color={FADE} /></button>
+          </div>
+          <div className="f-body" style={{ fontSize: 12.5, color: FADE, marginTop: 3 }}>{exG}</div>
+        </Card>
+        <PracticeSay key={"c" + cur.i} target={ex} lang={t} accent={accent}
+          onScore={(sc) => { observeSkill("speaking", Math.max(0.2, sc / 100)); }} />
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <Btn accent={accent} onClick={() => { addWords([{ term, translation: mean, example: ex }]); advance(true); }}>Done — next <ArrowRight size={14} /></Btn>
+        </div>
+      </div>)}
+    </Screen>
+  );
+}
+
+function GuidedTrainer({ pack, member, voices, accent, addWords, finish, exit, observeSkill }) {
+  const p = member.profile;
+  const t = p.target, n = p.native === "es" ? "es" : "en";
+  const kid = member.ageBand === "child";
+  const [step, setStep] = useState("listen"); // listen | quiz | echo | role | done
+  const [lineIdx, setLineIdx] = useState(-1);
+  const [playing, setPlaying] = useState(false);
+  const [peek, setPeek] = useState(false);
+  const [speed, setSpeed] = useState("normal");
+  const [qi, setQi] = useState(0);
+  const [picked, setPicked] = useState(null);
+  const [correct, setCorrect] = useState(0);
+  const [ei, setEi] = useState(0);          // echo index into keyLines
+  const [ri, setRi] = useState(0);          // role index into lines
+  const [reveal, setReveal] = useState(false);
+  const [scores, setScores] = useState([]);
+  const stopRef = useRef(false);
+
+  const line = (l) => (t === "es" ? l.es : l.en);
+  const gloss = (l) => (t === "es" ? l.en : l.es);
+  const keyLines = pack.lines.filter(l => l.k);
+  const roleLines = pack.lines;
+
+  const stopAudio = useCallback(() => {
+    stopRef.current = true;
+    try { window.speechSynthesis?.cancel(); } catch {}
+    setPlaying(false); setLineIdx(-1);
+  }, []);
+  useEffect(() => () => stopAudio(), [stopAudio]);
+
+  const speakLines = (idxs, done) => {
+    if (!window.speechSynthesis) { done?.(); return; }
+    stopAudio(); stopRef.current = false; setPlaying(true);
+    const vF = pickVoice(voices, t, null, "f");
+    const vM = pickVoice(voices, t, null, "m");
+    const sv = [vF || vM, (vM && vM !== vF) ? vM : (vF || vM)];
+    const same = sv[0] === sv[1];
+    const rate = (SPEEDS[speed] || 1) * 0.95;
+    const go = (k) => {
+      if (stopRef.current || k >= idxs.length) { setPlaying(false); setLineIdx(-1); if (!stopRef.current) done?.(); return; }
+      const i = idxs[k]; setLineIdx(i);
+      const u = new SpeechSynthesisUtterance(line(pack.lines[i]));
+      const v = sv[pack.lines[i].s] || sv[0];
+      if (v) u.voice = v;
+      u.lang = v?.lang || LANGS[t].tts;
+      const pros = prosodyFor(line(pack.lines[i]));
+      u.rate = rate * pros.rate;
+      u.pitch = (same ? [1.0, 1.18][pack.lines[i].s] : 1) * pros.pitch;
+      u.onend = () => setTimeout(() => go(k + 1), 300);
+      u.onerror = () => { setPlaying(false); setLineIdx(-1); };
+      window.speechSynthesis.speak(u);
+    };
+    go(0);
+  };
+  const playAll = () => speakLines(pack.lines.map((_, i) => i));
+  const playOne = (i) => speakLines([i]);
+
+  const answer = (i) => {
+    if (picked !== null) return;
+    setPicked(i);
+    const ok = i === pack.quiz[qi].a;
+    if (ok) setCorrect(c => c + 1);
+    sfx(ok ? "ding" : "soft");
+    observeSkill("comprehension", ok ? 1 : 0.25);
+  };
+
+  const finishAll = () => {
+    addWords(pack.words.map(w => ({ term: t === "es" ? w.es : w.en, translation: t === "es" ? w.en : w.es, example: w.ex })));
+    const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+    finish(18 + (avg >= 80 ? 6 : 0));
+  };
+
+  const StepDots = () => {
+    const order = ["listen", "quiz", "echo", "role"];
+    return (
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {order.map(o => <div key={o} style={{ height: 5, flex: 1, borderRadius: 3, background: order.indexOf(o) <= order.indexOf(step === "done" ? "role" : step) ? accent : "#DCE5E1" }} />)}
+      </div>
+    );
+  };
+
+  return (
+    <Screen exit={() => { stopAudio(); exit(); }} title={`${pack.emoji} ${pack.title[n]}`}>
+      <StepDots />
+      {step === "listen" && (<div>
+        <p className="f-body" style={{ color: FADE, fontSize: 14, marginBottom: 12 }}>{pack.scene[n]} {kid ? "Listen with big ears! 👂" : "Listen first — the transcript stays hidden until you've tried."}</p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          <Btn small accent={accent} onClick={playAll} disabled={playing}><Play size={14} /> {playing ? "Playing…" : "Play the conversation"}</Btn>
+          <Chip label="🐢 Slow" accent={accent} selected={speed === "slow"} onClick={() => setSpeed(sp => sp === "slow" ? "normal" : "slow")} />
+          <Chip label={peek ? "Hide text" : "Peek text"} accent={accent} selected={peek} onClick={() => setPeek(v => !v)} />
+        </div>
+        <Card style={{ padding: 14 }}>
+          {pack.lines.map((l, i) => (
+            <div key={i} onClick={() => playOne(i)} style={{ display: "flex", gap: 10, padding: "7px 4px", borderRadius: 10, background: lineIdx === i ? "#E3F1EE" : "transparent", cursor: "pointer", alignItems: "baseline" }}>
+              <span style={{ fontSize: 13 }}>{l.s === 0 ? "🗣️" : "🫵"}</span>
+              <div style={{ flex: 1 }}>
+                <div className="f-body" style={{ fontSize: 14.5, fontWeight: l.s === 1 ? 600 : 400, filter: peek || lineIdx === i ? "none" : "blur(5px)" }}>{line(l)}</div>
+                {peek && <div className="f-body" style={{ fontSize: 12, color: FADE }}>{gloss(l)}</div>}
+              </div>
+              <Volume2 size={13} color={FADE} />
+            </div>
+          ))}
+        </Card>
+        <Btn full accent={accent} onClick={() => { stopAudio(); setStep("quiz"); }} style={{ marginTop: 14 }}>I've listened — quiz me <ArrowRight size={15} /></Btn>
+      </div>)}
+
+      {step === "quiz" && (<div>
+        <div className="f-body" style={{ fontSize: 12.5, fontWeight: 700, color: FADE, marginBottom: 8 }}>UNDERSTANDING · {qi + 1}/{pack.quiz.length}</div>
+        <h2 className="f-display" style={{ fontSize: 20, fontWeight: 600, marginBottom: 14 }}>{pack.quiz[qi].q[n]}</h2>
+        {pack.quiz[qi].opts[n].map((o, i) => (
+          <Card key={i} onClick={() => answer(i)} style={{
+            padding: 14, marginBottom: 8,
+            border: picked === null ? "1.5px solid #DCE5E1" : i === pack.quiz[qi].a ? "1.5px solid #0E7C6B" : picked === i ? "1.5px solid #C64F3B" : "1.5px solid #DCE5E1",
+            background: picked !== null && i === pack.quiz[qi].a ? "#E3F1EE" : "#fff",
+          }}><span className="f-body" style={{ fontSize: 14.5 }}>{o}</span></Card>
+        ))}
+        {picked !== null && (
+          <Btn full accent={accent} style={{ marginTop: 8 }} onClick={() => {
+            setPicked(null);
+            if (qi < pack.quiz.length - 1) setQi(qi + 1); else setStep("echo");
+          }}>{qi < pack.quiz.length - 1 ? "Next" : "Now say it yourself"} <ArrowRight size={15} /></Btn>
+        )}
+        <Btn small ghost onClick={playAll} style={{ marginTop: 10 }}><Play size={13} /> Replay the clip</Btn>
+      </div>)}
+
+      {step === "echo" && (<div>
+        <div className="f-body" style={{ fontSize: 12.5, fontWeight: 700, color: FADE, marginBottom: 8 }}>ECHO THE KEY LINES · {ei + 1}/{keyLines.length}</div>
+        <p className="f-body" style={{ fontSize: 13.5, color: FADE, marginBottom: 10 }}>{kid ? "Copy the line like a parrot! 🦜" : "Hear it, then say it back — you're scored word by word."}</p>
+        <Card style={{ padding: 16, marginBottom: 12 }}>
+          <div className="f-display" style={{ fontSize: 19, fontWeight: 600 }}>
+            “{line(keyLines[ei])}”
+            <button onClick={() => speakLines([pack.lines.indexOf(keyLines[ei])])} aria-label="Hear it" style={iconBtn}><Volume2 size={16} color={FADE} /></button>
+          </div>
+          <div className="f-body" style={{ fontSize: 12.5, color: FADE, marginTop: 4 }}>{gloss(keyLines[ei])}</div>
+        </Card>
+        <PracticeSay key={"e" + ei} target={line(keyLines[ei])} lang={t} accent={accent}
+          onScore={(sc) => { setScores(a => [...a, sc]); observeSkill("speaking", Math.max(0.2, sc / 100)); }} />
+        <Btn full accent={accent} style={{ marginTop: 12 }} onClick={() => {
+          if (ei < keyLines.length - 1) setEi(ei + 1); else { setStep("role"); setRi(0); setReveal(false); }
+        }}>{ei < keyLines.length - 1 ? "Next line" : "Final step: play your role"} <ArrowRight size={15} /></Btn>
+      </div>)}
+
+      {step === "role" && (() => {
+        const l = roleLines[ri];
+        const mine = l.s === 1;
+        return (<div>
+          <div className="f-body" style={{ fontSize: 12.5, fontWeight: 700, color: FADE, marginBottom: 8 }}>YOUR TURN — YOU ARE 🫵 · line {ri + 1}/{roleLines.length}</div>
+          <p className="f-body" style={{ fontSize: 13.5, color: FADE, marginBottom: 10 }}>{kid ? "Now YOU are in the story!" : "The app plays the other speaker. When it's your line, say it — the hint tells you what to say."}</p>
+          <Card style={{ padding: 16, marginBottom: 12, background: mine ? "#FFF" : "#F7FAF9" }}>
+            {mine ? (<>
+              <div className="f-body" style={{ fontSize: 12, fontWeight: 700, color: "#8A6A1F", marginBottom: 4 }}>SAY THIS (in {LANGS[t].name}):</div>
+              <div className="f-body" style={{ fontSize: 15.5, fontWeight: 600 }}>{gloss(l)}</div>
+              {reveal && <div className="f-display" style={{ fontSize: 17, marginTop: 8, color: "#0E7C6B" }}>“{line(l)}”</div>}
+            </>) : (<>
+              <div className="f-body" style={{ fontSize: 12, fontWeight: 700, color: FADE, marginBottom: 4 }}>🗣️ THE OTHER SPEAKER:</div>
+              <div className="f-display" style={{ fontSize: 17 }}>
+                “{line(l)}”
+                <button onClick={() => playOne(ri)} aria-label="Hear it" style={iconBtn}><Volume2 size={15} color={FADE} /></button>
+              </div>
+              <div className="f-body" style={{ fontSize: 12.5, color: FADE, marginTop: 3 }}>{gloss(l)}</div>
+            </>)}
+          </Card>
+          {mine ? (<>
+            <PracticeSay key={"r" + ri} target={line(l)} lang={t} accent={accent}
+              onScore={(sc) => { setScores(a => [...a, sc]); observeSkill("speaking", Math.max(0.2, sc / 100)); }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <Btn small ghost onClick={() => setReveal(true)}>Show me the line</Btn>
+              <Btn small accent={accent} onClick={() => { setReveal(false); if (ri < roleLines.length - 1) setRi(ri + 1); else setStep("done"); }}>
+                {ri < roleLines.length - 1 ? "Next" : "Finish"} <ArrowRight size={14} /></Btn>
+            </div>
+          </>) : (
+            <Btn full accent={accent} onClick={() => { playOne(ri); setTimeout(() => { if (ri < roleLines.length - 1) setRi(ri + 1); else setStep("done"); }, 400); }}>
+              Play & continue <ArrowRight size={15} /></Btn>
+          )}
+        </div>);
+      })()}
+
+      {step === "done" && (<div style={{ textAlign: "center", paddingTop: 30 }}>
+        <div style={{ fontSize: 52 }}>{kid ? "🎉" : "🏁"}</div>
+        <h2 className="f-display" style={{ fontSize: 24, fontWeight: 600, margin: "10px 0 6px" }}>{kid ? "You did the whole story!" : "Conversation trained"}</h2>
+        <p className="f-body" style={{ color: FADE, fontSize: 14, marginBottom: 6 }}>
+          Understanding: {correct}/{pack.quiz.length} · Lines spoken: {scores.length}
+          {scores.length ? ` · avg clarity ${Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)}%` : ""}
+        </p>
+        <p className="f-body" style={{ color: FADE, fontSize: 13, marginBottom: 18 }}>3 phrases from this conversation were added to your review deck.</p>
+        <Btn full accent={accent} onClick={finishAll}>Collect {18}+ XP <Star size={15} /></Btn>
+      </div>)}
+    </Screen>
+  );
+}
+
 function ListeningLab({ member, voices, accent, addWords, finish, exit, observeSkill }) {
+  const [guided, setGuided] = useState(null);
   const p = member.profile;
   const [channel, setChannel] = useState(null);
   const [clip, setClip] = useState(null);
@@ -2468,6 +3465,7 @@ function ListeningLab({ member, voices, accent, addWords, finish, exit, observeS
   const [speed, setSpeed] = useState("normal");
   const [showScript, setShowScript] = useState(false);
   const [listens, setListens] = useState(0);
+  const [audioFail, setAudioFail] = useState(false);
   const [qi, setQi] = useState(0);
   const [picked, setPicked] = useState(null);
   const [correct, setCorrect] = useState(0);
@@ -2477,12 +3475,14 @@ function ListeningLab({ member, voices, accent, addWords, finish, exit, observeS
     setChannel(ch); setLoading(true); setErr(false); setClip(null);
     setStage("listen"); setListens(0); setShowScript(false); setQi(0); setPicked(null); setCorrect(0);
     try {
-      const c = await askAI(
+      setAudioFail(false);
+      const c = await askClaude(
         `${memberBrief(member)}\n\nWrite a short ${LANGS[p.target].name} listening clip in the format "${ch.label}" (${ch.speakers} speaker${ch.speakers > 1 ? "s" : ""}), themed on the learner's interests. Respond ONLY with JSON, no fences:
 {"title":"short title in ${p.native}","scene":"one-line setup in ${p.native} (who/where — no spoilers)","speakers":["first name"${ch.speakers > 1 ? ',"first name"' : ""}],"lines":[{"s":0,"text":"one short natural ${LANGS[p.target].name} sentence","gloss":"${p.native} meaning"}],"questions":[{"prompt":"comprehension question in ${p.native}","options":["4 options in ${p.native}"],"answer":0,"explain":"1 sentence in ${p.native}"}],"words":[{"term":"useful ${LANGS[p.target].name} word from the clip","translation":"${p.native}","example":"short line"}]}
 ${ch.speakers > 1 ? '"s" alternates 0/1 between speakers.' : '"s" is always 0.'} 6–9 lines, spoken register, level ${p.level} plus a small stretch. Exactly 3 questions that require actually understanding the clip (not guessable from options alone). Exactly 3 words.`,
         { json: true, maxTokens: 1300 });
       setClip(c);
+      if (!window.speechSynthesis) setShowScript(true); // no audio on this device: reading mode
     } catch { setErr(true); }
     setLoading(false);
   };
@@ -2520,7 +3520,7 @@ ${ch.speakers > 1 ? '"s" alternates 0/1 between speakers.' : '"s" is always 0.'}
       u.rate = rate * pros.rate;
       u.pitch = (pitches[clip.lines[i].s] || 1) * pros.pitch;
       u.onend = () => setTimeout(() => speakLine(i + 1), 260);
-      u.onerror = () => { setPlaying(false); setLineIdx(-1); };
+      u.onerror = () => { setPlaying(false); setLineIdx(-1); setAudioFail(true); setShowScript(true); };
       window.speechSynthesis.speak(u);
     };
     speakLine(0);
@@ -2540,10 +3540,30 @@ ${ch.speakers > 1 ? '"s" alternates 0/1 between speakers.' : '"s" is always 0.'}
     else { addWords(clip.words || []); setStage("results"); }
   };
 
+  if (guided) return (
+    <GuidedTrainer pack={guided} member={member} voices={voices} accent={accent}
+      addWords={addWords} finish={finish} observeSkill={observeSkill} exit={() => setGuided(null)} />
+  );
+
   if (!channel) return (
     <Screen exit={exit} title="Listening lab">
-      <p className="f-body" style={{ color: FADE, marginBottom: 16 }}>
-        Train your ear: a fresh clip at your level, played aloud — no transcript until you've answered. Replays are free.
+      <div className="f-body" style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: .6, color: FADE, marginBottom: 8 }}>GUIDED TRAINING</div>
+      <p className="f-body" style={{ color: FADE, fontSize: 13.5, marginBottom: 10 }}>
+        Coached conversations in four steps: listen, prove you understood, echo the key lines, then play your role out loud.
+      </p>
+      {GUIDED_CONVOS.filter(g => member.ageBand === "child" ? g.band === "child" : g.band === "adult").map(g => (
+        <Card key={g.id} onClick={() => setGuided(g)} style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10, padding: 16 }}>
+          <span style={{ fontSize: 24 }}>{g.emoji}</span>
+          <div style={{ flex: 1 }}>
+            <div className="f-body" style={{ fontWeight: 600 }}>{g.title[member.profile.native === "es" ? "es" : "en"]}</div>
+            <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>Level {g.level} · listen → quiz → echo → your turn</div>
+          </div>
+          <ChevronRight size={16} color={FADE} />
+        </Card>
+      ))}
+      <div className="f-body" style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: .6, color: FADE, margin: "18px 0 8px" }}>FRESH CLIPS</div>
+      <p className="f-body" style={{ color: FADE, fontSize: 13.5, marginBottom: 10 }}>
+        A brand-new clip at your level, themed on your interests — no transcript until you've answered.
       </p>
       {CHANNELS.map(ch => (
         <Card key={ch.id} onClick={() => generate(ch)} style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10, padding: 16 }}>
@@ -2654,10 +3674,16 @@ ${ch.speakers > 1 ? '"s" alternates 0/1 between speakers.' : '"s" is always 0.'}
         </Card>
       )}
 
-      <Btn full accent={accent} onClick={() => { stopAudio(); setStage("quiz"); }} disabled={listens === 0 && !!window.speechSynthesis && !showScript} style={{ marginTop: 10 }}>
+      {playing && (
+        <div style={{ display: "flex", gap: 5, justifyContent: "center", marginTop: 12 }} aria-label="Playback progress">
+          {clip.lines.map((_, i) => <span key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: i <= lineIdx ? accent : "#DCE5E1", transition: "background .2s" }} />)}
+        </div>
+      )}
+      {audioFail && <p className="f-body" style={{ fontSize: 12.5, color: "#8A6A1F", textAlign: "center", marginTop: 10 }}>🔇 Audio hiccup on this device — no problem, the transcript is open. Read it, then take the quiz.</p>}
+      <Btn full accent={accent} onClick={() => { stopAudio(); setStage("quiz"); }} style={{ marginTop: 10 }}>
         I'm ready — quiz me <ArrowRight size={16} />
       </Btn>
-      {listens === 0 && !!window.speechSynthesis && !showScript && <p className="f-body" style={{ fontSize: 12, color: "#9AA8A3", textAlign: "center", marginTop: 8 }}>Listen to the whole clip at least once first.</p>}
+      {listens === 0 && !audioFail && !showScript && !!window.speechSynthesis && <p className="f-body" style={{ fontSize: 12, color: "#9AA8A3", textAlign: "center", marginTop: 8 }}>Best after one full listen — but you're the boss.</p>}
     </Screen>
   );
 }
@@ -2732,7 +3758,7 @@ function TranslateView({ member, tts, accent, addWords }) {
     const src = dir === "to" ? p.native : LANGS[p.target].name;
     const dst = dir === "to" ? LANGS[p.target].name : p.native;
     try {
-      const r = await askAI(
+      const r = await askClaude(
         `Translate from ${src} to ${dst} for a ${p.level} learner: "${text.trim()}"
 Respond ONLY with JSON, no fences:
 {"translation":"best natural translation","breakdown":[{"part":"chunk","gloss":"${p.native} meaning / grammar role"}],"variants":{"formal":"…","informal":"…","slang":"regional/slang, name region"},"note":"one usage/culture note in ${p.native}"}
@@ -3052,7 +4078,7 @@ function ProfileView({ member, household, accent, tts, voices, update, reset, sw
               <Btn small accent={accent} onClick={pin.set}>Set parent PIN</Btn>
             )}
           </div>
-          <button onClick={() => { try { ["lingua-openai-key", "lingua-skip-key", "lingua-mode", "lingua-server-url", "lingua-token"].forEach(k => localStorage.removeItem(k)); } catch {} window.location.reload(); }}
+          <button onClick={() => { try { ["lingua-anthropic-key", "lingua-openai-key", "lingua-ai-provider", "lingua-skip-key", "lingua-mode", "lingua-server-url", "lingua-token"].forEach(k => localStorage.removeItem(k)); } catch {} window.location.reload(); }}
             className="f-body" style={{ background: "none", border: "none", color: FADE, fontSize: 12, cursor: "pointer", padding: 0, marginTop: 10, display: "block" }}>
             ⚙️ Change connection (server / API key)
           </button>
@@ -3098,7 +4124,7 @@ function WeeklyDigest({ members, household, accent, viewerNative, onSave }) {
         const sk = SKILLS.map(k => `${SKILL_LABELS[k]} ${Math.round(m.skills[k]?.s || 15)}`).join(", ");
         return `${m.name} (${AGE_BANDS[m.ageBand].label}, learning ${LANGS[m.profile.target].name}, ${m.profile.level}): streak ${m.stats.streak}d, ${m.stats.lessons} lessons, ${m.stats.talks} talks, ${m.stats.stories || 0} stories total; skills [${sk}] trend ${trendOf(m) >= 0 ? "+" : ""}${trendOf(m).toFixed(1)}; deck ${m.deck.length} words (${due} due); struggles: ${weak.join(", ") || "none"}`;
       }).join("\n");
-      const d = await askAI(
+      const d = await askClaude(
         `You are writing a warm, concrete weekly progress digest for a ${cls ? "teacher about their students" : "parent about their family's language learning"}. Write in ${viewerNative}. Data:\n${lines}\n\nRespond ONLY with JSON, no fences:
 {"headline":"one upbeat, specific sentence about the ${cls ? "class" : "family"} overall","members":[{"name":"exact name from data","summary":"2 warm, specific sentences grounded ONLY in the data (no invented events)","tip":"1 concrete, actionable suggestion for this week"}]}
 One entry per person, in the same order. Never invent activity that isn't in the data; if someone was inactive, say so kindly and suggest a tiny restart.`,
@@ -3395,7 +4421,7 @@ function AssignmentsBanner({ assignments, kid, accent, onGo }) {
 
 /* ─────────────────────────── Home screens ────────────────────────────── */
 
-function AdultHome({ member, accent, goLesson, goTalk, goReview, goListen, nudge, assignments, onGoAssignment }) {
+function AdultHome({ member, accent, goLesson, goCourse, goTalk, goReview, goListen, nudge, assignments, onGoAssignment }) {
   const p = member.profile, s = member.stats;
   const due = member.deck.filter(c => c.due <= Date.now()).length;
   const hour = new Date().getHours();
@@ -3415,6 +4441,37 @@ function AdultHome({ member, accent, goLesson, goTalk, goReview, goListen, nudge
 
       <AssignmentsBanner assignments={assignments} kid={false} accent={accent} onGo={onGoAssignment} />
 
+      {(() => {
+        const lp = learningProgress(member);
+        const mini = (label, pct, detail) => (
+          <div>
+            <div className="f-body" style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: FADE, marginBottom: 3 }}>
+              <span style={{ fontWeight: 600 }}>{label}</span><span>{detail}</span>
+            </div>
+            <div style={{ height: 4, borderRadius: 2, background: "#E8EEEB" }}>
+              <div style={{ height: 4, borderRadius: 2, width: `${pct}%`, background: accent, transition: "width .4s" }} />
+            </div>
+          </div>
+        );
+        return (
+          <Card style={{ padding: 16, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", marginBottom: 8 }}>
+              <div className="f-body" style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: FADE, flex: 1 }}>YOUR PROGRESS</div>
+              <div className="f-display" style={{ fontSize: 22, fontWeight: 600, color: accent }}>{lp.overall}%</div>
+            </div>
+            <div style={{ height: 9, borderRadius: 5, background: "#E8EEEB", marginBottom: 14 }} role="progressbar" aria-valuenow={lp.overall} aria-valuemin={0} aria-valuemax={100}>
+              <div style={{ height: 9, borderRadius: 5, width: `${lp.overall}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
+              {mini("Course", lp.course, `${lp.course}%`)}
+              {mini("Skill checks", lp.skills, `${lp.skills}%`)}
+              {mini("Vocabulary", lp.vocab, `${lp.words} words`)}
+              {mini("Conversations", lp.talk, `${lp.talks} talks`)}
+            </div>
+          </Card>
+        );
+      })()}
+
       {nudge && (
         <div className="rise" style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: "12px 14px", marginBottom: 12 }}>
           <Orb accent={accent} size={28} active={false} />
@@ -3431,6 +4488,11 @@ function AdultHome({ member, accent, goLesson, goTalk, goReview, goListen, nudge
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Card onClick={goCourse} style={{ padding: 16 }}>
+          <GraduationCap size={20} color={accent} />
+          <div className="f-body" style={{ fontWeight: 600, marginTop: 8 }}>Course path</div>
+          <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>Fundamentals, mastered step by step</div>
+        </Card>
         <Card onClick={goTalk} style={{ padding: 16 }}>
           <Mic size={20} color={accent} />
           <div className="f-body" style={{ fontWeight: 600, marginTop: 8 }}>Just talk</div>
@@ -3441,20 +4503,17 @@ function AdultHome({ member, accent, goLesson, goTalk, goReview, goListen, nudge
           <div className="f-body" style={{ fontWeight: 600, marginTop: 8 }}>Review</div>
           <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>{due > 0 ? `${due} word${due > 1 ? "s" : ""} ready` : "Nothing due yet"}</div>
         </Card>
-        <Card onClick={goListen} style={{ padding: 16, gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 12 }}>
+        <Card onClick={goListen} style={{ padding: 16 }}>
           <Headphones size={20} color={accent} />
-          <div style={{ flex: 1 }}>
-            <div className="f-body" style={{ fontWeight: 600 }}>Listening lab</div>
-            <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>Train your ear — clips at your level, no transcript</div>
-          </div>
-          <ChevronRight size={16} color={FADE} />
+          <div className="f-body" style={{ fontWeight: 600, marginTop: 8 }}>Listening lab</div>
+          <div className="f-body" style={{ fontSize: 12.5, color: FADE }}>Guided conversations that train your ear</div>
         </Card>
       </div>
     </div>
   );
 }
 
-function ChildHome({ member, accent, goLesson, goStory, goTalk, goReview, assignments, onGoAssignment }) {
+function ChildHome({ member, accent, goLesson, goCourse, goStory, goTalk, goReview, assignments, onGoAssignment }) {
   const s = member.stats;
   const stars = Math.floor(s.xp / 10);
   const due = member.deck.filter(c => c.due <= Date.now()).length;
@@ -3478,9 +4537,37 @@ function ChildHome({ member, accent, goLesson, goStory, goTalk, goReview, assign
         </div>
       </div>
       <AssignmentsBanner assignments={assignments} kid={true} accent={accent} onGo={onGoAssignment} />
+      {(() => {
+        const lp = learningProgress(member);
+        return (
+          <Card style={{ padding: "14px 16px 18px", marginBottom: 12, background: KID_CARD, border: "none" }}>
+            <div className="f-body" style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, letterSpacing: .6, color: "#6B5B3E", marginBottom: 10 }}>
+              <span>🗺️ MY ADVENTURE</span><span>{lp.overall}% explored!</span>
+            </div>
+            <div style={{ position: "relative", height: 12, borderRadius: 7, background: "#FFFFFF99" }} role="progressbar" aria-valuenow={lp.overall} aria-valuemin={0} aria-valuemax={100}>
+              <div style={{ height: 12, borderRadius: 7, width: `${Math.max(lp.overall, 4)}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
+              <span style={{ position: "absolute", top: -11, left: `calc(${Math.max(lp.overall, 4)}% - 13px)`, fontSize: 21, transition: "left .5s" }}>🚀</span>
+              <span style={{ position: "absolute", right: -4, top: -10, fontSize: 18 }}>🏆</span>
+            </div>
+            <div className="f-body" style={{ fontSize: 11.5, color: "#6B5B3E", marginTop: 9 }}>
+              {lp.words} words collected · {lp.talks} talks with {tutorFor(member).name}
+            </div>
+          </Card>
+        );
+      })()}
+      {(member.stickers || []).length > 0 && (
+        <Card style={{ padding: "12px 16px", marginBottom: 12 }}>
+          <div className="f-body" style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: .6, color: FADE, marginBottom: 6 }}>🎁 MY STICKERS</div>
+          <div style={{ fontSize: 26, letterSpacing: 4 }}>
+            {(member.stickers || []).join(" ")}
+            {(member.stickers || []).length < STICKERS.length && <span style={{ opacity: .3 }}> +?</span>}
+          </div>
+        </Card>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         {big("📖", "Story time", `${tutorFor(member).name} tells you a story!`, goStory, 0)}
         {big("🎲", "Play & learn", "New words and games", goLesson, 0.3)}
+        {big("🗺️", "Course adventure", "Beat levels, unlock the next!", goCourse, 0.45)}
         {big("🎤", `Talk to ${tutorFor(member).name}`, "They talk back!", goTalk, 0.6)}
         {big("💎", "Treasure chest", due > 0 ? `${due} words to practice!` : "Your word collection", goReview, 0.9)}
       </div>
@@ -3498,7 +4585,7 @@ function LinguaApp() {
   const [addRole, setAddRole] = useState("child");
   const [activeId, setActiveId] = useState(null);
   const [tab, setTab] = useState("home");
-  const [mode, setMode] = useState(null); // 'lesson'
+  const [mode, setMode] = useState(null); // 'lesson' | 'listen' | 'course'
   const [toast, setToast] = useState(null);
   const [nudge, setNudge] = useState(null);
   const [pendingGreet, setPendingGreet] = useState(null);
@@ -3872,11 +4959,14 @@ function LinguaApp() {
         ) : mode === "listen" ? (
           <ListeningLab member={member} voices={voices} accent={accent} addWords={addWords} observeSkill={observeSkill}
             finish={(xp) => { award(xp, "listen"); setMode(null); setTab("home"); }} exit={() => setMode(null)} />
+        ) : mode === "course" ? (
+          <CourseView member={member} update={updateMember} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill}
+            finish={(xp) => { award(xp, "lesson"); setMode(null); setTab("home"); }} exit={() => { tts.stop(); setMode(null); }} />
         ) : (
           <>
             {tab === "home" && (kid
-              ? <ChildHome member={member} accent={accent} assignments={openAssignments} onGoAssignment={goAssignment} goLesson={() => setMode("lesson")} goStory={() => setTab("story")} goTalk={() => setTab("talk")} goReview={() => setTab("review")} />
-              : <AdultHome member={member} accent={accent} nudge={nudge} assignments={openAssignments} onGoAssignment={goAssignment} goLesson={() => setMode("lesson")} goTalk={() => setTab("talk")} goReview={() => setTab("review")} goListen={() => setMode("listen")} />)}
+              ? <ChildHome member={member} accent={accent} assignments={openAssignments} onGoAssignment={goAssignment} goLesson={() => setMode("lesson")} goCourse={() => setMode("course")} goStory={() => setTab("story")} goTalk={() => setTab("talk")} goReview={() => setTab("review")} />
+              : <AdultHome member={member} accent={accent} nudge={nudge} assignments={openAssignments} onGoAssignment={goAssignment} goLesson={() => setMode("lesson")} goCourse={() => setMode("course")} goTalk={() => setTab("talk")} goReview={() => setTab("review")} goListen={() => setMode("listen")} />)}
             {tab === "story" && kid && <StoryView member={member} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill} finish={(xp) => { award(xp, "story"); }} />}
             {tab === "review" && <ReviewView member={member} tts={tts} accent={accent} grade={gradeCard} observeSkill={observeSkill} finish={(xp) => award(xp, "review")} />}
             {tab === "talk" && <TalkView member={member} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill} update={updateMember} finish={(xp) => award(xp, "talk")} />}
@@ -3985,7 +5075,7 @@ function LinguaApp() {
 /* ───────────────────────────── Root ───────────────────────────── */
 
 export default function Root() {
-  const [mode] = useState(APP_MODE);
+  const [mode, setMode] = useState(APP_MODE);
   const [ready, setReady] = useState(hasAiAccess);
   const wrap = (child) => (
     <div className="f-body" style={{ minHeight: "100vh", background: MIST, color: INK }}>
@@ -3993,6 +5083,7 @@ export default function Root() {
       {child}
     </div>
   );
+  if (!mode) return wrap(<ModeGate onDone={() => setMode(APP_MODE())} />);
   if (mode === "local" && !ready) return wrap(<ApiKeyGate onDone={() => setReady(true)} />);
   return <LinguaApp />;
 }

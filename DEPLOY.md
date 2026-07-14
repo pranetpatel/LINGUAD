@@ -72,6 +72,7 @@ PORT=8787
 OPENAI_API_KEY=sk-...                   # required, lessons, talk, stories, digests
 ELEVENLABS_API_KEY=...                  # optional, premium voices + acoustic STT scoring
 DEEPGRAM_API_KEY=...                    # optional, live streaming transcription (nova-2)
+DATABASE_URL=postgres://user:pass@host:5432/lingua      # optional, Postgres instead of JSON file
 MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/lingua   # optional, MongoDB instead of JSON file
 CLIENT_ORIGIN=https://lingua.family     # CORS allow-list; comma-separate extra origins
 JWT_SECRET=<64 random hex chars>        # openssl rand -hex 32; auto-generated if empty
@@ -80,9 +81,12 @@ JWT_SECRET=<64 random hex chars>        # openssl rand -hex 32; auto-generated i
 Notes that matter: `CLIENT_ORIGIN` must exactly match the deployed client origin (scheme
 included) or every browser call fails CORS. Set `JWT_SECRET` explicitly in production, the
 auto-generated fallback lands in `server/data/secret`, which disappears on ephemeral filesystems
-and would sign everyone out on each deploy. With `MONGODB_URI` set the server logs
-`[store] backend: mongo` at boot and creates its own collections (`accounts`, `households`); no migration
-step. Without MongoDB, back up `server/data/db.json`, it is the entire database.
+and would sign everyone out on each deploy. The store seam checks `DATABASE_URL` first, then
+`MONGODB_URI`, then falls back to the JSON file — so an existing Mongo deploy keeps working
+untouched until `DATABASE_URL` is set. With `DATABASE_URL` set the server logs
+`[store] backend: pg` at boot and creates its own tables (`accounts`, `households`); with
+`MONGODB_URI` it logs `[store] backend: mongo` and creates its own collections. No migration step
+either way. Without a database URL, back up `server/data/db.json`, it is the entire database.
 
 ### Verify the backend
 

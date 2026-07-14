@@ -3,12 +3,13 @@
 import http from "node:http";
 import express from "express";
 import cors from "cors";
-import { PORT, OPENAI_KEY, ELEVEN_KEY, ORIGINS } from "./env.js";
+import { PORT, ANTHROPIC_KEY, ELEVEN_KEY, ORIGINS } from "./env.js";
 import { accounts, households } from "./store.js";
 import { signup, login, requireAuth } from "./auth.js";
 import { transcribe } from "./speech/providers.js";
 import { scoreUtterance } from "./speech/score.js";
 import { makeLimiter, byIp, byAccount } from "./ratelimit.js";
+import { complete, pickProvider } from "./ai.js";
 import { attachAsr, streamingAvailable } from "./asr/stream.js";
 
 const app = express();
@@ -26,7 +27,7 @@ const scoreLimit = makeLimiter({ windowMs: 60000, max: 30,  name: "score" });
 const syncLimit  = makeLimiter({ windowMs: 60000, max: 120, name: "sync"  });
 
 app.get("/api/health", (_, res) => ok(res, { ok: true, service: "lingua" }));
-app.get("/api/config", (_, res) => ok(res, { ai: !!OPENAI_KEY, tts: !!ELEVEN_KEY, stt: !!ELEVEN_KEY, streamingAsr: streamingAvailable() }));
+app.get("/api/config", (_, res) => ok(res, { ai: !!pickProvider(), aiProvider: pickProvider(), tts: !!ELEVEN_KEY, stt: !!ELEVEN_KEY, streamingAsr: streamingAvailable() }));
 
 /* ── auth ── */
 app.post("/api/auth/signup", authLimit.mw(byIp), async (req, res) => { try { ok(res, await signup(req.body || {})); } catch (e) { fail(res, e); } });
@@ -55,29 +56,12 @@ app.delete("/api/household", requireAuth, syncLimit.mw(byAccount), async (req, r
   } catch (e) { fail(res, e); }
 });
 
-/* ── server-held AI key: OpenAI proxy ── */
+/* ── server-held AI key: Anthropic/OpenAI proxy (dual provider) ── */
 app.post("/api/ai", requireAuth, aiLimit.mw(byAccount), async (req, res) => {
   try {
-    if (!OPENAI_KEY) return fail(res, { status: 503, message: "Server has no OPENAI_API_KEY configured" });
     const { messages, maxTokens } = req.body || {};
     if (!Array.isArray(messages) || !messages.length) return fail(res, { status: 400, message: "messages required" });
-    const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        max_tokens: Math.min(Number(maxTokens) || 1000, 1600),
-        // hardening: cap history depth and per-message size so one client can't ship megabyte prompts
-        messages: messages.slice(-60).map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content ?? "").slice(0, 8000) })),
-      }),
-    });
-    if (!upstream.ok) {
-      const errBody = await upstream.text();
-      return res.status(upstream.status).type("application/json").send(errBody);
-    }
-    const data = await upstream.json();
-    const text = data.choices?.[0]?.message?.content || "";
-    ok(res, { content: [{ type: "text", text }] });
+    ok(res, await complete({ messages, maxTokens }));
   } catch (e) { fail(res, e); }
 });
 
@@ -119,4 +103,4 @@ app.post("/api/speech/score", requireAuth, scoreLimit.mw(byAccount), async (req,
 
 const server = http.createServer(app);
 attachAsr(server); // WebSocket streaming-ASR gateway on the same port
-server.listen(PORT, () => console.log(`Lingua server on :${PORT}  ai=${!!OPENAI_KEY} tts/stt=${!!ELEVEN_KEY} streamingAsr=${streamingAvailable()}`));
+server.listen(PORT, () => console.log(`Lingua server on :${PORT}  ai=${!!ANTHROPIC_KEY || !!process.env.OPENAI_API_KEY} tts/stt=${!!ELEVEN_KEY} streamingAsr=${streamingAvailable()}`));
