@@ -2783,7 +2783,7 @@ Scenes 2 and 4 must include a question; others null. Soft pastel bg colors. Whol
 
 /* ───────────────────────────── Lesson ─────────────────────────────── */
 
-function LessonView({ member, tts, accent, addWords, finish, exit, observeSkill, assignedTopic }) {
+function LessonView({ member, update, tts, accent, addWords, finish, exit, observeSkill, assignedTopic }) {
   const p = member.profile;
   const kid = member.ageBand === "child";
   const [lesson, setLesson] = useState(null);
@@ -2869,7 +2869,7 @@ Exactly ${kid ? 4 : 5} vocab items at level ${p.level}, exactly ${kid ? 3 : 4} e
           </div>
           {isServer() && (
             <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
-              <PracticeSay target={lesson.vocab[vi].term} lang={p.target} accent={accent} onScore={(sc) => observeSkill("speaking", sc)} />
+              <PracticeSay target={lesson.vocab[vi].term} lang={p.target} accent={accent} onScore={(sc) => observeSkill("speaking", Math.max(0.2, sc / 100))} />
             </div>
           )}
         </Card>
@@ -3014,15 +3014,17 @@ function CourseView({ member, update, tts, accent, addWords, finish, exit, obser
     resetExercise();
     setQueue(q);
     if (!q.length) {
+      let toUpdate = member;
       if (kid) {
         const owned = member.stickers || [];
         const avail = STICKERS.filter(x => !owned.includes(x));
         if (avail.length) {
           const pick = avail[Math.floor(Math.random() * avail.length)];
           setWonSticker(pick);
-          update({ ...member, stickers: [...owned, pick], path: { ...prog, [unit.id]: { ...(prog[unit.id] || {}), [cur.i]: cur.m + 1 } } });
+          toUpdate = { ...member, stickers: [...owned, pick] };
         }
       }
+      update(toUpdate);
       beginCreative();
     }
   };
@@ -3079,7 +3081,7 @@ function CourseView({ member, update, tts, accent, addWords, finish, exit, obser
               {unitsDone}/{flat.length} units · {itemsMastered}/{itemsTotal} {kid ? "words won" : "items mastered"}
             </div>
           </div>
-          <div style={{ height: 8, borderRadius: 4, background: "#E8EEEB" }} role="progressbar" aria-valuenow={itemsMastered} aria-valuemin={0} aria-valuemax={itemsTotal}>
+          <div style={{ height: 8, borderRadius: 4, background: "#E8EEEB", overflow: "hidden" }} role="progressbar" aria-valuenow={itemsMastered} aria-valuemin={0} aria-valuemax={itemsTotal}>
             <div style={{ height: 8, borderRadius: 4, width: `${itemsTotal ? (itemsMastered / itemsTotal) * 100 : 0}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
           </div>
           {!kid && <p className="f-body" style={{ fontSize: 12.5, color: FADE, margin: "10px 0 0" }}>
@@ -4534,7 +4536,7 @@ function AdultHome({ member, accent, goLesson, goCourse, goTalk, goReview, goLis
               <div className="f-body" style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: FADE, flex: 1 }}>YOUR PROGRESS</div>
               <div className="f-display" style={{ fontSize: 22, fontWeight: 600, color: accent }}>{lp.overall}%</div>
             </div>
-            <div style={{ height: 9, borderRadius: 5, background: "#E8EEEB", marginBottom: 14 }} role="progressbar" aria-valuenow={lp.overall} aria-valuemin={0} aria-valuemax={100}>
+            <div style={{ height: 9, borderRadius: 5, background: "#E8EEEB", marginBottom: 14, overflow: "hidden" }} role="progressbar" aria-valuenow={lp.overall} aria-valuemin={0} aria-valuemax={100}>
               <div style={{ height: 9, borderRadius: 5, width: `${lp.overall}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
@@ -5046,7 +5048,7 @@ function LinguaApp() {
       <Fonts />
       <div style={{ maxWidth: 520, margin: "0 auto", padding: "24px 18px 100px" }}>
         {mode === "lesson" ? (
-          <LessonView member={member} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill}
+          <LessonView member={member} update={updateMember} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill}
             assignedTopic={openAssignments.find(a => a.kind === "lesson" && a.topic)?.topic}
             finish={(xp) => { award(xp, "lesson"); setMode(null); setTab("home"); }} exit={() => { tts.stop(); setMode(null); }} />
         ) : mode === "listen" ? (
