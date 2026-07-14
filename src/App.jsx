@@ -468,9 +468,11 @@ const pathExGloss = (item, target) => target === "es" ? item.xen : item.xes;
 /* Composite learning progress: course mastery + tested skills + vocabulary bank
    + conversation practice, weighted. Every number comes from real activity. */
 function learningProgress(member) {
+  const clampPct = (n) => Math.max(0, Math.min(100, Math.round(n)));
   const skills = member.skills || {};
+  // Skill scores (s) are already 0–100 — do not multiply by 100 again.
   const tested = SKILLS.map(k => skills[k]).filter(v => v && v.n > 0).map(v => v.s);
-  const skillPct = tested.length ? (tested.reduce((a, b) => a + b, 0) / tested.length) * 100 : 0;
+  const skillPct = tested.length ? tested.reduce((a, b) => a + b, 0) / tested.length : 0;
   let got = 0, total = 0;
   PATH_UNITS.forEach(u => u.items.forEach((_, i) => { total += 5; got += Math.min((member.path?.[u.id]?.[i]) || 0, 5); }));
   const coursePct = total ? (got / total) * 100 : 0;
@@ -478,8 +480,16 @@ function learningProgress(member) {
   const vocabPct = Math.min(100, (words / 120) * 100);
   const talks = member.stats?.talks || 0;
   const talkPct = Math.min(100, (talks / 25) * 100);
-  const overall = Math.round(coursePct * 0.35 + skillPct * 0.35 + vocabPct * 0.15 + talkPct * 0.15);
-  return { overall, course: Math.round(coursePct), skills: Math.round(skillPct), vocab: Math.round(vocabPct), talk: Math.round(talkPct), words, talks };
+  const overall = coursePct * 0.35 + skillPct * 0.35 + vocabPct * 0.15 + talkPct * 0.15;
+  return {
+    overall: clampPct(overall),
+    course: clampPct(coursePct),
+    skills: clampPct(skillPct),
+    vocab: clampPct(vocabPct),
+    talk: clampPct(talkPct),
+    words,
+    talks,
+  };
 }
 
 /* Live voice styling: presets multiply into the persona's base voice, and for
@@ -1047,6 +1057,7 @@ const Fonts = () => (
     .bar-fallback{animation:bounce-bar 1s ease-in-out infinite}
     .rise{animation:rise .35s ease both}.pop{animation:pop .4s ease both}.floaty{animation:floaty 3s ease-in-out infinite}
     @media (prefers-reduced-motion:reduce){.rise,.pop,.floaty,.orb-a,.orb-b{animation:none!important}}
+    html,body,#root{overflow-x:hidden;max-width:100vw}
     ::selection{background:#D9A44133}
     button:focus-visible{outline:2px solid ${INK};outline-offset:2px}
   `}</style>
@@ -4521,23 +4532,24 @@ function AdultHome({ member, accent, goLesson, goCourse, goTalk, goReview, goLis
       {(() => {
         const lp = learningProgress(member);
         const mini = (label, pct, detail) => (
-          <div>
-            <div className="f-body" style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: FADE, marginBottom: 3 }}>
-              <span style={{ fontWeight: 600 }}>{label}</span><span>{detail}</span>
+          <div style={{ minWidth: 0 }}>
+            <div className="f-body" style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11.5, color: FADE, marginBottom: 3 }}>
+              <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+              <span style={{ flexShrink: 0 }}>{detail}</span>
             </div>
-            <div style={{ height: 4, borderRadius: 2, background: "#E8EEEB" }}>
-              <div style={{ height: 4, borderRadius: 2, width: `${pct}%`, background: accent, transition: "width .4s" }} />
+            <div style={{ height: 4, borderRadius: 2, background: "#E8EEEB", overflow: "hidden" }}>
+              <div style={{ height: 4, borderRadius: 2, width: `${Math.min(100, Math.max(0, pct))}%`, maxWidth: "100%", background: accent, transition: "width .4s" }} />
             </div>
           </div>
         );
         return (
-          <Card style={{ padding: 16, marginBottom: 12 }}>
+          <Card style={{ padding: 16, marginBottom: 12, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "baseline", marginBottom: 8 }}>
               <div className="f-body" style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: FADE, flex: 1 }}>YOUR PROGRESS</div>
               <div className="f-display" style={{ fontSize: 22, fontWeight: 600, color: accent }}>{lp.overall}%</div>
             </div>
             <div style={{ height: 9, borderRadius: 5, background: "#E8EEEB", marginBottom: 14, overflow: "hidden" }} role="progressbar" aria-valuenow={lp.overall} aria-valuemin={0} aria-valuemax={100}>
-              <div style={{ height: 9, borderRadius: 5, width: `${lp.overall}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
+              <div style={{ height: 9, borderRadius: 5, width: `${lp.overall}%`, maxWidth: "100%", background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
               {mini("Course", lp.course, `${lp.course}%`)}
@@ -4622,9 +4634,11 @@ function ChildHome({ member, accent, goLesson, goCourse, goStory, goTalk, goRevi
               <span>🗺️ MY ADVENTURE</span><span>{lp.overall}% explored!</span>
             </div>
             <div style={{ position: "relative", height: 12, borderRadius: 7, background: "#FFFFFF99" }} role="progressbar" aria-valuenow={lp.overall} aria-valuemin={0} aria-valuemax={100}>
-              <div style={{ height: 12, borderRadius: 7, width: `${Math.max(lp.overall, 4)}%`, background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
-              <span style={{ position: "absolute", top: -11, left: `calc(${Math.max(lp.overall, 4)}% - 13px)`, fontSize: 21, transition: "left .5s" }}>🚀</span>
-              <span style={{ position: "absolute", right: -4, top: -10, fontSize: 18 }}>🏆</span>
+              <div style={{ height: 12, borderRadius: 7, overflow: "hidden" }}>
+                <div style={{ height: 12, borderRadius: 7, width: `${Math.min(100, Math.max(lp.overall, 4))}%`, maxWidth: "100%", background: `linear-gradient(90deg, ${accent}, ${GOLD})`, transition: "width .5s" }} />
+              </div>
+              <span style={{ position: "absolute", top: -11, left: `min(calc(${Math.min(100, Math.max(lp.overall, 4))}% - 13px), calc(100% - 26px))`, fontSize: 21, transition: "left .5s" }}>🚀</span>
+              <span style={{ position: "absolute", right: 0, top: -10, fontSize: 18 }}>🏆</span>
             </div>
             <div className="f-body" style={{ fontSize: 11.5, color: "#6B5B3E", marginTop: 9 }}>
               {lp.words} words collected · {lp.talks} talks with {tutorFor(member).name}
@@ -5044,9 +5058,9 @@ function LinguaApp() {
     ];
 
   return (
-    <div className="f-body" style={{ minHeight: "100vh", background: bg, color: INK }}>
+    <div className="f-body" style={{ minHeight: "100vh", background: bg, color: INK, overflowX: "hidden", maxWidth: "100vw" }}>
       <Fonts />
-      <div style={{ maxWidth: 520, margin: "0 auto", padding: "24px 18px 100px" }}>
+      <div style={{ maxWidth: 520, margin: "0 auto", padding: "24px 18px 100px", width: "100%", boxSizing: "border-box", overflowX: "hidden" }}>
         {mode === "lesson" ? (
           <LessonView member={member} update={updateMember} tts={tts} accent={accent} addWords={addWords} observeSkill={observeSkill}
             assignedTopic={openAssignments.find(a => a.kind === "lesson" && a.topic)?.topic}
