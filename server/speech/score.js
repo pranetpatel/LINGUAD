@@ -113,19 +113,21 @@ function phonemeSim(exp, hyp, lang) {
   if (!pe.length) return 1;
   // sequence edit distance over phoneme arrays
   const m = pe.length, n = ph.length;
-  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  const d = Array.from({ length: m + 1 }, (_, idx) => [idx, ...Array(n).fill(0)]);
   for (let j = 0; j <= n; j++) d[0][j] = j;
   for (let i = 1; i <= m; i++)
     for (let j = 1; j <= n; j++)
       d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (pe[i - 1] === ph[j - 1] ? 0 : 1));
   let sim = 1 - d[m][n] / Math.max(m, n);
-  if (pe[0] !== ph[0]) sim *= 0.85; // onset errors are perceptually severe
+  if (pe[0] !== ph[0]) sim *= 0.75; // onset errors are perceptually severe — increased penalty from 0.85
+  // vowel mismatches in stressed positions are also severe
+  if (/[aeiouæɛɪɑʌ]/.test(pe[1] || "") && pe[1] !== ph[1]) sim *= 0.8;
   return sim;
 }
 
 /** Main entry. expected/heard = strings; wordConfs = optional map heardWord→0..1
-    from the acoustic ASR. Returns {overall, words[], advice[]}. */
-export function scoreUtterance({ expected, heard, lang = "es", wordConfs = null, overallConf = null }) {
+    from the acoustic ASR. Returns {overall, words[], advice[], debug}. */
+export function scoreUtterance({ expected, heard, lang = "es", wordConfs = null, overallConf = null, debug = false }) {
   const exp = tokenize(expected);
   const hyp = tokenize(heard || "");
   if (!exp.length) return { overall: 0, words: [], advice: ["Nothing to score."] };
@@ -133,11 +135,22 @@ export function scoreUtterance({ expected, heard, lang = "es", wordConfs = null,
   const words = [];
   for (const op of ops) {
     if (!op.exp) continue; // extra inserted word — ignored for scoring
-    let sim = op.hyp ? 0.45 * charSim(op.exp, op.hyp) + 0.55 * phonemeSim(op.exp, op.hyp, lang) : 0;
-    const conf = op.hyp && wordConfs ? wordConfs[strip(op.hyp.toLowerCase())] : (op.hyp ? overallConf : null);
-    let score = typeof conf === "number" ? 0.6 * sim + 0.4 * conf : sim;
+    if (!op.hyp) {
+      // Word was missed entirely
+      words.push({ expected: op.exp, heard: null, score: 0, ok: false, phonemes: g2p(op.exp, lang).slice(0, 3) });
+      continue;
+    }
+    // Compute phoneme-level accuracy: how many phonemes matched
+    const pe = g2p(op.exp, lang), ph = g2p(op.hyp, lang);
+    const phoneticMatches = pe.filter((p, i) => p === ph[i]).length;
+    const phoneticAccuracy = pe.length > 0 ? phoneticMatches / pe.length : 1;
+
+    // Blend: char similarity (lexical), phoneme similarity (acoustic), and ASR confidence
+    let sim = 0.3 * charSim(op.exp, op.hyp) + 0.7 * phonemeSim(op.exp, op.hyp, lang);
+    const conf = wordConfs ? wordConfs[strip(op.hyp.toLowerCase())] : overallConf;
+    let score = typeof conf === "number" ? 0.5 * sim + 0.35 * conf + 0.15 * phoneticAccuracy : sim;
     score = Math.round(Math.max(0, Math.min(1, score)) * 100);
-    const entry = { expected: op.exp, heard: op.hyp, score, ok: score >= 75 };
+    const entry = { expected: op.exp, heard: op.hyp, score, ok: score >= 75, phoneticAccuracy: Math.round(phoneticAccuracy * 100) };
     if (!entry.ok) entry.phonemes = phonemeDiff(op.exp, op.hyp, lang);
     words.push(entry);
   }
@@ -150,5 +163,14 @@ export function scoreUtterance({ expected, heard, lang = "es", wordConfs = null,
     return `"${w.expected}"${w.heard ? ` came out as "${w.heard}"` : " was missed"}${hint ? ` — focus on ${hint}` : ""}.`;
   });
   if (!advice.length) advice.push(overall >= 90 ? "Excellent — crisp and complete." : "Solid — one more pass and it's locked in.");
-  return { overall, words, advice };
+
+  const result = { overall, words, advice };
+  if (debug) {
+    result.debug = {
+      heard: heard,
+      wordAlignment: words.map(w => ({ exp: w.expected, hyp: w.heard, score: w.score, phoneticAccuracy: w.phoneticAccuracy })),
+      confidence: overallConf ? `overall: ${overallConf.toFixed(2)}` : "per-word or none",
+    };
+  }
+  return result;
 }
