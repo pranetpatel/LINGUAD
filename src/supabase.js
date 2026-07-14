@@ -220,6 +220,18 @@ export async function supaInviteMember({ email, name, ageBand, role, memberSeed 
   return data;
 }
 
+/** Join the household from a pending (or already-accepted) invite for the
+    signed-in user's email. Idempotent — safe for both new invitees (trigger
+    already joined them) and existing accounts accepting a magic-link invite. */
+export async function supaAcceptPendingInvite() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw Object.assign(new Error("Not signed in"), { status: 401 });
+  const res = await authedFetch("accept-invite", {});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || `API ${res.status}`), { status: res.status });
+  return data;
+}
+
 export async function supaListInvites() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw Object.assign(new Error("Not signed in"), { status: 401 });

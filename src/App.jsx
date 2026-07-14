@@ -9,7 +9,7 @@ import {
 import {
   supabase, supabaseConfigured, supaSignup, supaLogin, supaLogout,
   supaGetHousehold, supaPutHousehold, supaResetHousehold, supaAskAI, supaTts,
-  supaJoinHousehold, supaInviteMember, supaListInvites, supaRevokeInvite, supaSetMemberRole,
+  supaJoinHousehold, supaInviteMember, supaAcceptPendingInvite, supaListInvites, supaRevokeInvite, supaSetMemberRole,
 } from "./supabase.js";
 import { scoreUtterance } from "./speechScore.js";
 
@@ -1384,14 +1384,12 @@ function AuthFlow({ household, onSignedIn, onCreated, remote, onRemoteAuth }) {
 const backLink = { display: "block", margin: "16px auto 0", background: "none", border: "none", color: FADE, cursor: "pointer", fontSize: 14 };
 
 /* ─────────── Invite landing: an invited member's first arrival ───────── */
-// Reached via the /app/invite redirect from Supabase's invite email link.
-// inviteUserByEmail only ever establishes a magic-link session (no
-// password), so step 1 is mandatory before the invitee can sign in again
-// normally later. Step 2 hands off into the normal SetupMember wizard so
-// the member object is built by the same newMember() every local member
-// uses — no shape drift between invited and locally-added members.
+// Reached via /app/invite from Supabase invite email (new users) or magic-link
+// OTP (existing accounts). New invitees must set a password; existing ones
+// skip that. Both call accept-invite then SetupMember so the member object is
+// built by the same newMember() path as locally-added members.
 function InviteLanding({ onDone }) {
-  const [step, setStep] = useState("password"); // password | profile
+  const [step, setStep] = useState("loading"); // loading | password | profile
   const [pass, setPass] = useState("");
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
@@ -1400,20 +1398,42 @@ function InviteLanding({ onDone }) {
 
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      let memberSeed = null;
       try {
-        const { data } = await supabase
-          .from("household_invites")
-          .select("member_seed")
-          .eq("email", (user?.email || "").toLowerCase())
-          .eq("status", "accepted")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        memberSeed = data?.member_seed || null;
-      } catch {}
-      setSeed({ id: user?.id, name: memberSeed?.name || user?.user_metadata?.name || "", ...memberSeed });
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { setErr("Sign-in link expired — ask for a new invite."); setStep("password"); return; }
+
+        // Accept pending invite (existing accounts) or confirm trigger join (new).
+        let memberSeed = null;
+        try {
+          const accepted = await supaAcceptPendingInvite();
+          memberSeed = accepted.memberSeed || null;
+        } catch (e) {
+          // Fall back to reading an already-accepted invite (new-user trigger path).
+          try {
+            const { data } = await supabase
+              .from("household_invites")
+              .select("member_seed")
+              .eq("email", (user.email || "").toLowerCase())
+              .eq("status", "accepted")
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            memberSeed = data?.member_seed || null;
+          } catch {}
+          if (!memberSeed && e.message) setErr(e.message);
+        }
+
+        setSeed({ id: user.id, name: memberSeed?.name || user.user_metadata?.name || "", ...memberSeed });
+
+        // Brand-new invitees (inviteUserByEmail) need to set a password.
+        // Existing accounts arriving via magic link already have one.
+        const accountAgeMs = Date.now() - new Date(user.created_at).getTime();
+        const isNewInvitee = accountAgeMs < 15 * 60 * 1000;
+        setStep(isNewInvitee ? "password" : "profile");
+      } catch (e) {
+        setErr(e.message || "Could not open invite");
+        setStep("password");
+      }
     })();
   }, []);
 
@@ -1428,6 +1448,12 @@ function InviteLanding({ onDone }) {
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
+
+  if (step === "loading") return (
+    <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px", textAlign: "center" }}>
+      <Loader size={22} className="animate-spin" style={{ color: FADE }} />
+    </div>
+  );
 
   if (step === "password") return (
     <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px" }}>
@@ -1459,6 +1485,7 @@ function InviteLanding({ onDone }) {
   return (
     <div style={{ minHeight: "100vh", background: MIST, color: INK }}>
       <Fonts />
+      {err && <p className="f-body" style={{ color: "#A0453A", fontSize: 13.5, margin: "16px 22px" }}>{err}</p>}
       <SetupMember role="adult-member"
         defaults={{ id: seed?.id, name: seed?.name, target: seed?.target, native: seed?.native, goal: seed?.goal, interests: seed?.interests }}
         onDone={async (m) => { await supaJoinHousehold(m); onDone(); }} />
@@ -1685,27 +1712,43 @@ const lbl = { fontSize: 13.5, fontWeight: 600, color: FADE };
 /* ──────────── Parent side: send an email invite to an adult/teen ─────── */
 
 function InviteSend({ onCancel, onSent }) {
-  const [phase, setPhase] = useState("form"); // form | profile-seed
+  const [phase, setPhase] = useState("form"); // form | profile-seed | done
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [prefill, setPrefill] = useState(false);
   const [coParent, setCoParent] = useState(false);
-  const [seed, setSeed] = useState(null); // captured from SetupMember when prefill is on
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [doneMsg, setDoneMsg] = useState("");
 
   const send = async (memberSeed) => {
     setErr(""); setBusy(true);
     try {
-      await supaInviteMember({
+      const result = await supaInviteMember({
         email: email.trim(), name: name.trim(),
         ageBand: "adult", role: coParent ? "owner" : "member",
         memberSeed: memberSeed || undefined,
       });
-      onSent();
+      setDoneMsg(result?.message
+        || (result?.existingUser
+          ? "They already have an account — we emailed them a link to join."
+          : `Invite sent to ${email.trim()}.`));
+      setPhase("done");
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
+
+  if (phase === "done") return (
+    <div style={{ maxWidth: 440, margin: "0 auto", padding: "56px 22px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
+        <Orb accent="#0E7C6B" size={38} active={false} />
+        <div className="f-display" style={{ fontWeight: 700, fontSize: 20 }}>Lingua</div>
+      </div>
+      <h1 className="f-display" style={h1s}>Invite sent</h1>
+      <p className="f-body" style={{ color: FADE, marginBottom: 24, lineHeight: 1.5 }}>{doneMsg}</p>
+      <Btn full accent="#0E7C6B" onClick={() => onSent()}>Done <ArrowRight size={16} /></Btn>
+    </div>
+  );
 
   if (phase === "profile-seed") return (
     <SetupMember role="adult-member" defaults={{ name }}
@@ -1725,7 +1768,7 @@ function InviteSend({ onCancel, onSent }) {
       </div>
       <h1 className="f-display" style={h1s}>Invite a family member</h1>
       <p className="f-body" style={{ color: FADE, marginBottom: 16 }}>
-        They'll get an email to set their own password and sign in with their own login.
+        They'll get an email to join with their own login. New emails set a password; people who already use Lingua get a sign-in link instead.
       </p>
       <label className="f-body" style={lbl}>Their name</label>
       <input value={name} onChange={e => setName(e.target.value)} className="f-body" style={inputStyle} placeholder="e.g. Dana" />
@@ -4831,10 +4874,28 @@ function LinguaApp() {
       <Fonts />
       <AuthFlow household={household}
         remote={isServer()}
-        onRemoteAuth={(r) => {
+        onRemoteAuth={async (r) => {
           versionRef.current = r.version;
           setHousehold(r.data);
           setSignedIn(true);
+          // Existing account with a pending household invite (emailed a join
+          // link, or they signed in before clicking it) — accept + finish profile.
+          if (isSupabase()) {
+            try {
+              const accepted = await supaAcceptPendingInvite();
+              if (accepted?.joined) {
+                const fresh = await srv("/api/household");
+                versionRef.current = fresh.version;
+                setHousehold(streakFix(fresh.data));
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!fresh.data.members?.some(m => m.id === user?.id)) {
+                  setRoute("invite");
+                  return;
+                }
+                r = fresh;
+              }
+            } catch {}
+          }
           if (!r.data?.members?.length) setRoute("setup-parent");
           else if (r.data.type === "individual") { const first = r.data.members[0]; setActiveId(first.id); setTab("home"); setRoute("app"); }
           else setRoute("picker");
