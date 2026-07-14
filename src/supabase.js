@@ -216,7 +216,10 @@ export async function supaInviteMember({ email, name, ageBand, role, memberSeed 
   const householdId = await requireHouseholdId(user.id);
   const res = await authedFetch("invite", { email, name, ageBand, role, memberSeed, householdId });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || `API ${res.status}`), { status: res.status });
+  if (!res.ok) {
+    const msg = data.error || data.message || `API ${res.status}`;
+    throw Object.assign(new Error(msg), { status: res.status, details: data });
+  }
   return data;
 }
 
